@@ -1,0 +1,6 @@
+build/
+staging/
+dist/
+yosys-src/
+*.rpm
+*.deb

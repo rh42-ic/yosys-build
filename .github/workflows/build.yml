@@ -1,0 +1,131 @@
+name: Build Yosys Packages
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: Build ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bison clang cmake flex git \
+            libffi-dev libfl-dev libreadline-dev \
+            ninja-build pkg-config python3 ruby tcl-dev zlib1g-dev
+          sudo gem install fpm
+
+      - name: Clone Yosys
+        run: |
+          TAG='${{ github.ref_name }}'
+          echo "Cloning yosys at tag $TAG"
+          git clone --branch "$TAG" \
+            --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/YosysHQ/yosys.git yosys-src
+
+      - name: Configure build
+        run: |
+          cmake -B build -G Ninja \
+            -S yosys-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DYOSYS_USE_BUNDLED_LIBS=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_CXX_FLAGS="-march=x86-64-v3 -fno-math-errno -fno-trapping-math" \
+            -DCMAKE_C_FLAGS="-march=x86-64-v3 -fno-math-errno -fno-trapping-math" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,--as-needed"
+
+      - name: Compile
+        run: cmake --build build -j$(nproc)
+
+      - name: Install to staging directory
+        run: |
+          DESTDIR=$(pwd)/staging cmake --install build --strip
+
+      - name: Build RPM package
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          V="${VERSION#v}"
+          fpm -s dir -t rpm \
+            -n yosys \
+            -v "$V" \
+            --iteration 1 \
+            --architecture x86_64 \
+            --description "Yosys Open SYnthesis Suite - RTL synthesis framework" \
+            --url "https://yosyshq.net/yosys/" \
+            --license ISC \
+            --maintainer yosys-build \
+            --depends readline \
+            --depends tcl \
+            --depends zlib \
+            --depends libffi \
+            -p "dist/yosys-${V}-1.x86_64.rpm" \
+            -C staging usr/
+
+      - name: Build DEB package
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          V="${VERSION#v}"
+          fpm -s dir -t deb \
+            -n yosys \
+            -v "$V" \
+            --iteration 1 \
+            --architecture amd64 \
+            --description "Yosys Open SYnthesis Suite - RTL synthesis framework" \
+            --url "https://yosyshq.net/yosys/" \
+            --license ISC \
+            --maintainer yosys-build \
+            --depends libreadline8t64 \
+            --depends tcl8.6 \
+            --depends zlib1g \
+            --depends libffi8 \
+            -p "dist/yosys-${V}-1_amd64.deb" \
+            -C staging usr/
+
+      - name: Verify packages
+        run: |
+          ls -lh dist/
+
+      - name: Generate release notes
+        run: |
+          cat > dist/release.md << 'EOF'
+          基于 [Yosys TAG_PLACEHOLDER](https://github.com/YosysHQ/yosys/releases/tag/TAG_PLACEHOLDER) 编译。
+
+          ## 构建配置
+
+          - 编译器: Clang + LTO
+          - 指令集: x86-64-v3 (Haswell 2013+)
+          - 静态链接: libstdc++, libgcc, 自带库
+          - 系统: Ubuntu 24.04, glibc ≥ 2.39
+
+          ## 包内容
+          ```
+          EOF
+          for pkg in dist/*.rpm dist/*.deb; do
+            echo "=== $pkg ===" >> dist/release.md
+            case "$pkg" in
+              *.rpm) rpm -qlp "$pkg" 2>/dev/null >> dist/release.md || true ;;
+              *.deb) dpkg -c "$pkg" 2>/dev/null >> dist/release.md || true ;;
+            esac
+            echo "" >> dist/release.md
+          done
+          echo '```' >> dist/release.md
+          sed -i "s/TAG_PLACEHOLDER/${{ github.ref_name }}/g" dist/release.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist/*.rpm
+            dist/*.deb
+          body_path: dist/release.md
+          generate_release_notes: false
