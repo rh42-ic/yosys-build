@@ -6,62 +6,106 @@
 
 从 [Releases](https://github.com/rh42-ic/yosys-build/releases) 页面获取预编译包：
 
-- `yosys-{version}-1.x86_64.rpm`（Fedora / RHEL / openSUSE）
-- `yosys-{version}-1_amd64.deb`（Debian / Ubuntu 24.04+）
+- `yosys-{version}-1.el8.x86_64.rpm`（RHEL 8/9、AlmaLinux、Rocky Linux）
+- `yosys-{version}-1_amd64.deb`（Ubuntu 18.04+、Debian 10+，详见兼容性说明）
+
+## 兼容性
+
+| 要求 | 最低版本 | 说明 |
+| ------ | --------- | ------ |
+| **glibc** | ≥ 2.28 | AlmaLinux 8 构建，自然兼容 RHEL 8+ |
+| **CPU** | x86-64-v3 | Intel Haswell (2013+) / AMD Excavator (2015+)，AVX2/FMA/BMI |
+| **RHEL** | 8+ | 主要目标平台 |
+| **Ubuntu** | 18.04+ | 可能需要 compat 库，见下方说明 |
+| **Debian** | 10+ | 可能需要 compat 库 |
+
+### Ubuntu/Debian 兼容性说明
+
+二进制在 AlmaLinux 8 上编译，链接的 soname 随系统版本。如果 DEB 包安装时提示依赖不满足：
+
+```bash
+# Ubuntu 20.04+ 可能需要旧版 readline
+sudo apt install libreadline7
+
+# 如果 libffi6 不可用，创建符号链接（通常安全）
+# 或从旧版本 repo 安装
+```
+
+**建议**：EDA 工作站以 RHEL 8/9 为主，RPM 包开箱即用。
+
+## 依赖
+
+### 运行时（包管理器自动安装）
+
+| 库 | RPM 包名 | DEB 包名 |
+| ---- | ---------- | ---------- |
+| readline | `readline` | `libreadline7` |
+| Tcl | `tcl` | `tcl8.6` |
+| zlib | `zlib` | `zlib1g` |
+| libffi | `libffi` | `libffi6` |
+
+### 静态链接（已内置）
+
+| 组件 | 说明 |
+| ------ | ------ |
+| libstdc++、libgcc | C/C++ 运行时 |
+| ABC | 逻辑综合引擎 |  
+| fmt, json11, fst, bigint, slang… | 第三方 bundled 库 |
 
 ## 构建参数
 
 | 选项 | 值 | 说明 |
-| ------ | ----- | ------ |
+| ------ | ---- | ------ |
 | `CMAKE_BUILD_TYPE` | `Release` | 优化编译 |
-| `CMAKE_C_COMPILER` | `clang` | Clang 编译器 |
-| `CMAKE_CXX_COMPILER` | `clang++` | Clang C++ 编译器 |
+| `CMAKE_C_COMPILER` | `gcc` | GCC 12 (gcc-toolset-12) |
+| `CMAKE_CXX_COMPILER` | `g++` | GCC 12 C++ |
 | `CMAKE_INTERPROCEDURAL_OPTIMIZATION` | `ON` | 链接时优化 (LTO) |
 | `YOSYS_USE_BUNDLED_LIBS` | `ON` | 使用项目自带第三方库 |
 | `BUILD_SHARED_LIBS` | `OFF` | libyosys 编译为静态库 |
-| `-march=x86-64-v3` | — | 目标指令集 Haswell (2013+)，启用 AVX2/FMA/BMI |
-| `-fno-math-errno -fno-trapping-math` | — | 放宽浮点优化约束 |
+| `-march=x86-64-v3` | — | Haswell (2013+)，AVX2/FMA/BMI |
+| `-fno-math-errno -fno-trapping-math` | — | 放宽浮点优化 |
 | `-static-libgcc -static-libstdc++` | — | 静态链接 C/C++ 运行时 |
 
-## 静态链接策略
+## 与上游 yosys 的版本要求对比
 
-完全静态链接（`-static`）在 glibc 下不可靠（NSS/DNS 依赖动态加载）。采取折中：
+| 依赖 | 上游要求 | yosys-build | 降级方式 |
+| ------ | --------- | ------------- | --------- |
+| glibc | 取决于构建主机 | **≥ 2.28** | AlmaLinux 8 容器编译 |
+| CMake | ≥ 3.28 | 3.31（官方二进制） | 不依赖系统 repo |
+| Bison | ≥ 3.6 | 3.8.2（自编译） | 自编译安装到 /usr/local |
+| Python | ≥ 3.7 | 3.8（AppStream） | 满足 |
+| GCC | C++20 | 12 (gcc-toolset-12) | AppStream 安装 |
+| readline | 系统库 | 系统库（动态） | soname 兼容 |
 
-| 层级 | 链接方式 |
-| ------ | --------- |
-| C/C++ 运行时 (libstdc++, libgcc) | 静态 |
-| Yosys 自带库 (ABC, fmt, json11, fst…) | 静态 |
-| 系统库 (readline, Tcl, zlib, libffi) | 动态，由包管理器处理 |
+## 构建容器
 
-## 依赖
+在 `almalinux:8` 容器内编译，自然获得 glibc 2.28 兼容性。
 
 ### 编译依赖
 
-| 包 | 说明 |
-| ---- | ------ |
-| clang (C++20) | 编译器 |
-| cmake ≥ 3.28 | 构建系统 |
-| ninja-build | 构建后端 |
-| bison ≥ 3.8 | 语法解析器生成器 |
-| flex | 词法分析器 |
-| python3 ≥ 3.11 | 代码生成 |
-| libreadline-dev | 命令行编辑 |
-| libffi-dev | 外部函数接口 |
-| tcl-dev | Tcl 脚本 |
-| zlib1g-dev | 压缩库 |
+| 包 | 来源 | 说明 |
+| ---- | ------ | ------ |
+| gcc-toolset-12 | AlmaLinux 8 AppStream | C++20 编译器 |
+| cmake ≥ 3.28 | [官方二进制](https://github.com/Kitware/CMake/releases) | 构建系统，不依赖系统 repo |
+| bison ≥ 3.8 | [GNU FTP](https://ftp.gnu.org/gnu/bison/) | 自编译安装 |
+| flex ≥ 2.6 | AppStream | 词法分析器 |
+| ninja-build | AppStream | 构建后端 |
+| python38 | AppStream | 代码生成 |
+| readline-devel | AppStream | 命令行编辑 |
+| tcl-devel | AppStream | Tcl 脚本 |
+| zlib-devel | AppStream | 压缩库 |
+| libffi-devel | AppStream | 外部函数接口 |
+| ruby + fpm | AppStream + gem | 打 RPM/DEB 包 |
 
-### 运行时依赖
+## 本地构建
 
-| 库 | RPM | DEB |
-| ---- | ----- | ----- |
-| readline | `readline` | `libreadline8t64` |
-| Tcl | `tcl` | `tcl8.6` |
-| zlib | `zlib` | `zlib1g` |
-| libffi | `libffi` | `libffi8` |
-
-## 兼容性
-
-二进制在 Ubuntu 24.04 (glibc 2.39) 上编译，需要 glibc ≥ 2.39（Ubuntu 24.04+、Fedora 39+、RHEL 10+）。CPU 需支持 x86-64-v3（Haswell 2013+）。
+```bash
+docker run --rm -v "$(pwd):/work" -w /work almalinux:8 \
+    bash -c "
+        bash scripts/install-deps.sh &&
+        bash scripts/build.sh v0.67
+    "
+```
 
 ## 许可
 
