@@ -14,11 +14,14 @@ dnf install -y \
 	flex \
 	git \
 	make \
+	m4 \
 	ninja-build \
 	pkgconfig \
 	python38 \
 	ruby \
-	rubygems
+	rubygems \
+	tar \
+	xz
 
 # ----- Build-time libraries -----
 dnf install -y \
@@ -33,6 +36,9 @@ if ! cmake --version 2>/dev/null | grep -q "${CMAKE_VERSION}"; then
 	curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" |
 		tar xz -C /usr/local --strip-components=1
 fi
+
+# ----- Enable GCC 12 for all subsequent compilation -----
+source /opt/rh/gcc-toolset-12/enable
 
 # ----- Compile Bison 3.8+ from source (repo has 3.0.4) -----
 BISON_VERSION=3.8.2
@@ -52,7 +58,6 @@ fi
 gem install fpm --no-document
 
 echo '=== Build environment ready ==='
-source /opt/rh/gcc-toolset-12/enable
 gcc --version | head -1
 g++ --version | head -1
 cmake --version | head -1
