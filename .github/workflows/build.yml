@@ -39,7 +39,9 @@ jobs:
           echo "=== DEB contents ==="
           for pkg in dist/*.deb; do
             echo "--- $(basename "$pkg") ---"
-            ar p "$pkg" data.tar.xz | tar tJ | head -30
+            ar t "$pkg" | grep -q data.tar.xz && ar p "$pkg" data.tar.xz | tar tJ | head -30
+            ar t "$pkg" | grep -q data.tar.gz && ar p "$pkg" data.tar.gz | tar tz | head -30
+            ar t "$pkg" | grep -q data.tar.zst && ar p "$pkg" data.tar.zst | tar --zstd -t | head -30
           done
           echo ""
           echo "=== Dynamic library requirements ==="
@@ -94,7 +96,15 @@ jobs:
             { echo "=== $base ==="; echo '```'; } >> dist/release.md
             case "$pkg" in
               *.rpm) rpm -qlp "$pkg" 2>/dev/null >> dist/release.md ;;
-              *.deb) ar p "$pkg" data.tar.xz | tar tJ 2>/dev/null >> dist/release.md ;;
+              *.deb)
+                if ar t "$pkg" 2>/dev/null | grep -q data.tar.xz; then
+                  ar p "$pkg" data.tar.xz | tar tJ 2>/dev/null >> dist/release.md
+                elif ar t "$pkg" 2>/dev/null | grep -q data.tar.gz; then
+                  ar p "$pkg" data.tar.gz | tar tz 2>/dev/null >> dist/release.md
+                elif ar t "$pkg" 2>/dev/null | grep -q data.tar.zst; then
+                  ar p "$pkg" data.tar.zst | tar --zstd -t 2>/dev/null >> dist/release.md
+                fi
+                ;;
             esac
             echo '```' >> dist/release.md
             echo "" >> dist/release.md
