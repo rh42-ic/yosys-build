@@ -49,7 +49,7 @@ DESTDIR="${STAGING_DIR}" cmake --install "${BUILD_DIR}" --strip
 
 # ----- Build RPM package -----
 mkdir -p "${DIST_DIR}"
-gem install fpm --no-document 2>/dev/null || true
+gem install fpm -v '~> 1.15.0' --no-document 2>/dev/null || true
 
 # RPM (RHEL 8/9, AlmaLinux, Rocky Linux)
 fpm -s dir -t rpm \

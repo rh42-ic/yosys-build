@@ -54,8 +54,8 @@ if ! bison --version 2>/dev/null | grep -q "${BISON_VERSION}"; then
 	rm -rf "bison-${BISON_VERSION}"
 fi
 
-# ----- fpm for packaging -----
-gem install fpm --no-document
+# ----- fpm for packaging (v1.15 last to support Ruby 2.5) -----
+gem install fpm -v '~> 1.15.0' --no-document
 
 echo '=== Build environment ready ==='
 gcc --version | head -1
