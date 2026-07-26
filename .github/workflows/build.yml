@@ -84,28 +84,60 @@ jobs:
           | Tcl | `tcl` | `tcl8.6` |
           | zlib | `zlib` | `zlib1g` |
           | libffi | `libffi` | `libffi6` |
-
-          ## Package Contents
-          ```
           ENDOFFILE
           # Replace placeholder
           sed -i "s/TAG_PLACEHOLDER/${TAG}/g" dist/release.md
-          # Append package listings
+
+          # Helper: normalize paths (DEB has ./usr/..., RPM has /usr/...)
+          normalize() {
+            sed -e 's#^\./##' -e '/\/$/d' -e 's#^usr/#/usr/#'
+          }
+          # Helper: filter noise entries
+          filter_listing() {
+            sed -e '/^\/usr\/lib\/\.build-id\//d' \
+                -e '/^\/usr\/share\/doc\//d' \
+                -e '/^\/usr\/share\/man\//d' \
+                -e '/^\/usr\/share\/info\//d'
+          }
+
           for pkg in dist/*.rpm dist/*.deb; do
             base="$(basename "$pkg")"
-            { echo "=== $base ==="; echo '```'; } >> dist/release.md
+            echo "### ${base}" >> dist/release.md
+            echo '```' >> dist/release.md
+
+            listing=$(mktemp)
             case "$pkg" in
-              *.rpm) rpm -qlp "$pkg" 2>/dev/null >> dist/release.md ;;
+              *.rpm)
+                rpm -qlp "$pkg" 2>/dev/null | filter_listing | sort > "$listing"
+                ;;
               *.deb)
                 if ar t "$pkg" 2>/dev/null | grep -q data.tar.xz; then
-                  ar p "$pkg" data.tar.xz | tar tJ 2>/dev/null >> dist/release.md
+                  ar p "$pkg" data.tar.xz | tar tJ 2>/dev/null | normalize | filter_listing | sort > "$listing"
                 elif ar t "$pkg" 2>/dev/null | grep -q data.tar.gz; then
-                  ar p "$pkg" data.tar.gz | tar tz 2>/dev/null >> dist/release.md
+                  ar p "$pkg" data.tar.gz | tar tz 2>/dev/null | normalize | filter_listing | sort > "$listing"
                 elif ar t "$pkg" 2>/dev/null | grep -q data.tar.zst; then
-                  ar p "$pkg" data.tar.zst | tar --zstd -t 2>/dev/null >> dist/release.md
+                  ar p "$pkg" data.tar.zst | tar --zstd -t 2>/dev/null | normalize | filter_listing | sort > "$listing"
                 fi
                 ;;
             esac
+
+            # Condensed tree: files at depth 3 shown individually,
+            # deeper paths collapsed into directory with file count
+            awk -F/ '{
+              depth = NF - 1
+              if (depth == 3) {
+                print "  " $0
+              } else if (depth >= 4) {
+                dir = "/" $2 "/" $3 "/" $4
+                counts[dir]++
+              }
+            }
+            END {
+              for (d in counts)
+                printf "  %s/  (%d files)\n", d, counts[d]
+            }' "$listing" >> dist/release.md
+
+            rm -f "$listing"
             echo '```' >> dist/release.md
             echo "" >> dist/release.md
           done
