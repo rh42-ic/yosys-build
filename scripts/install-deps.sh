@@ -30,6 +30,11 @@ dnf install -y \
 	zlib-devel \
 	libffi-devel
 
+# ----- Packaging tools (rpmbuild for RPM, dpkg-dev from EPEL for DEB) -----
+dnf install -y \
+	rpm-build \
+	dpkg-dev
+
 # ----- Install CMake from official binary (repo CMake 3.20 is too old) -----
 CMAKE_VERSION=3.31.6
 if ! cmake --version 2>/dev/null | grep -q "${CMAKE_VERSION}"; then
