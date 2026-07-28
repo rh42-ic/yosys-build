@@ -12,8 +12,8 @@ STAGING_DIR="${SCRIPT_DIR}/../staging"
 DIST_DIR="${SCRIPT_DIR}/../dist"
 SRC_DIR="${SCRIPT_DIR}/../yosys-src"
 
-# ----- Enable GCC 12 from gcc-toolset-12 -----
-source /opt/rh/gcc-toolset-12/enable
+# ----- Enable GCC 14 from gcc-toolset-14 -----
+source /opt/rh/gcc-toolset-14/enable
 
 # ----- Clone yosys -----
 if [ ! -d "${SRC_DIR}" ]; then
@@ -38,7 +38,9 @@ cmake -B "${BUILD_DIR}" -G Ninja \
 	-DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
 	-DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
 	-DYOSYS_USE_BUNDLED_LIBS=ON \
-	-DBUILD_SHARED_LIBS=OFF
+	-DBUILD_SHARED_LIBS=OFF \
+	-DYOSYS_WITH_PYTHON=ON \
+	-DYOSYS_INSTALL_PYTHON=ON
 
 # ----- Build -----
 cmake --build "${BUILD_DIR}" -j$(nproc)
@@ -66,6 +68,7 @@ fpm -s dir -t rpm \
 	--depends tcl \
 	--depends zlib \
 	--depends libffi \
+	--depends python38 \
 	-p "${DIST_DIR}/yosys-${VERSION}-1.el8.x86_64.rpm" \
 	-C "${STAGING_DIR}" usr/
 
@@ -83,6 +86,7 @@ fpm -s dir -t deb \
 	--depends tcl8.6 \
 	--depends zlib1g \
 	--depends libffi6 \
+	--depends libpython3.8 \
 	-p "${DIST_DIR}/yosys-${VERSION}-1_amd64.deb" \
 	-C "${STAGING_DIR}" usr/
 

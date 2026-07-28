@@ -8,9 +8,9 @@ dnf config-manager --set-enabled powertools
 
 # ----- Base toolchain -----
 dnf install -y \
-	gcc-toolset-12-gcc \
-	gcc-toolset-12-gcc-c++ \
-	gcc-toolset-12-binutils \
+	gcc-toolset-14-gcc \
+	gcc-toolset-14-gcc-c++ \
+	gcc-toolset-14-binutils \
 	flex \
 	git \
 	make \
@@ -18,6 +18,7 @@ dnf install -y \
 	ninja-build \
 	pkgconfig \
 	python38 \
+	python38-devel \
 	ruby \
 	rubygems \
 	tar \
@@ -42,8 +43,8 @@ if ! cmake --version 2>/dev/null | grep -q "${CMAKE_VERSION}"; then
 		tar xz -C /usr/local --strip-components=1
 fi
 
-# ----- Enable GCC 12 for all subsequent compilation -----
-source /opt/rh/gcc-toolset-12/enable
+# ----- Enable GCC 14 for all subsequent compilation -----
+source /opt/rh/gcc-toolset-14/enable
 
 # ----- Compile Bison 3.8+ from source (repo has 3.0.4) -----
 BISON_VERSION=3.8.2
