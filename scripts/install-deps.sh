@@ -15,7 +15,7 @@ dnf install -y \
 	git \
 	make \
 	m4 \
-	ninja-build \
+	unzip \
 	pkgconfig \
 	python39 \
 	python39-devel \
@@ -45,6 +45,15 @@ CMAKE_VERSION=3.31.6
 if ! cmake --version 2>/dev/null | grep -q "${CMAKE_VERSION}"; then
 	curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" |
 		tar xz -C /usr/local --strip-components=1
+fi
+
+# ----- Install Ninja from official binary (repo ninja 1.9 fails on multi-output depslog used by yosys 0.68 pyosys) -----
+NINJA_VERSION=1.12.1
+if ! ninja --version 2>/dev/null | grep -q "${NINJA_VERSION}"; then
+	curl -fsSL "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip" -o /tmp/ninja-linux.zip
+	unzip -o /tmp/ninja-linux.zip -d /usr/local/bin
+	rm -f /tmp/ninja-linux.zip
+	ninja --version
 fi
 
 # ----- Enable GCC 14 for all subsequent compilation -----
