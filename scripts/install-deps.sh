@@ -19,6 +19,7 @@ dnf install -y \
 	pkgconfig \
 	python38 \
 	python38-devel \
+	python38-pip \
 	ruby \
 	rubygems \
 	tar \
@@ -35,6 +36,9 @@ dnf install -y \
 dnf install -y \
 	rpm-build \
 	dpkg-dev
+
+# ----- Python deps for Pyosys (yosys FindPyosysEnv requires pybind11 + cxxheaderparser on the host interpreter) -----
+python3.8 -m pip install --no-cache-dir 'pybind11>=3,<4' cxxheaderparser
 
 # ----- Install CMake from official binary (repo CMake 3.20 is too old) -----
 CMAKE_VERSION=3.31.6
