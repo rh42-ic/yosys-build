@@ -63,9 +63,9 @@ jobs:
           | Compiler | GCC 14 |
           | `CMAKE_BUILD_TYPE` | `Release` |
           | `CMAKE_INTERPROCEDURAL_OPTIMIZATION` | `ON` (LTO) |
-| `YOSYS_USE_BUNDLED_LIBS` | `ON` |
-| `BUILD_SHARED_LIBS` | `OFF` |
-| `YOSYS_WITH_PYTHON` | `ON` (Pyosys) |
+          | `YOSYS_USE_BUNDLED_LIBS` | `ON` |
+          | `BUILD_SHARED_LIBS` | `OFF` |
+          | `YOSYS_WITH_PYTHON` | `ON` (Pyosys) |
           | Target CPU | `x86-64-v3` (Haswell 2013+) |
           | Float flags | `-fno-math-errno -fno-trapping-math` |
           | C/C++ runtime | Static (`-static-libgcc -static-libstdc++`) |
@@ -85,7 +85,7 @@ jobs:
           | Tcl | `tcl` | `tcl8.6` |
           | zlib | `zlib` | `zlib1g` |
           | libffi | `libffi` | `libffi6` |
-| Python | `python38` | `libpython3.8` |
+          | Python | `python38` | `libpython3.8` |
           ENDOFFILE
           # Replace placeholder
           sed -i "s/TAG_PLACEHOLDER/${TAG}/g" dist/release.md
