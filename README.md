@@ -43,6 +43,7 @@ sudo apt install libreadline7
 | Tcl | `tcl` | `tcl8.6` |
 | zlib | `zlib` | `zlib1g` |
 | libffi | `libffi` | `libffi6` |
+| Python (Pyosys) | `python39` | `libpython3.9` |
 
 ### 静态链接（已内置）
 
@@ -57,11 +58,12 @@ sudo apt install libreadline7
 | 选项 | 值 | 说明 |
 | ------ | ---- | ------ |
 | `CMAKE_BUILD_TYPE` | `Release` | 优化编译 |
-| `CMAKE_C_COMPILER` | `gcc` | GCC 12 (gcc-toolset-12) |
-| `CMAKE_CXX_COMPILER` | `g++` | GCC 12 C++ |
+| `CMAKE_C_COMPILER` | `gcc` | GCC 14 (gcc-toolset-14) |
+| `CMAKE_CXX_COMPILER` | `g++` | GCC 14 C++ |
 | `CMAKE_INTERPROCEDURAL_OPTIMIZATION` | `ON` | 链接时优化 (LTO) |
 | `YOSYS_USE_BUNDLED_LIBS` | `ON` | 使用项目自带第三方库 |
 | `BUILD_SHARED_LIBS` | `OFF` | libyosys 编译为静态库 |
+| `YOSYS_WITH_PYTHON` | `ON` | 启用 Pyosys Python 绑定 |
 | `-march=x86-64-v3` | — | Haswell (2013+)，AVX2/FMA/BMI |
 | `-fno-math-errno -fno-trapping-math` | — | 放宽浮点优化 |
 | `-static-libgcc -static-libstdc++` | — | 静态链接 C/C++ 运行时 |
@@ -73,8 +75,9 @@ sudo apt install libreadline7
 | glibc | 取决于构建主机 | **≥ 2.28** | AlmaLinux 8 容器编译 |
 | CMake | ≥ 3.28 | 3.31（官方二进制） | 不依赖系统 repo |
 | Bison | ≥ 3.6 | 3.8.2（自编译） | 自编译安装到 /usr/local |
-| Python | ≥ 3.7 | 3.8（AppStream） | 满足 |
-| GCC | C++20 | 12 (gcc-toolset-12) | AppStream 安装 |
+| Ninja | ≥ 1.10 | 1.12.1（官方二进制） | 多输出 depslog 需要 1.10+ |
+| Python | ≥ 3.9 | 3.9（AppStream） | pyosys/generator.py 使用 3.9+ 语法 |
+| GCC | C++20 | 14 (gcc-toolset-14) | AppStream 安装 |
 | readline | 系统库 | 系统库（动态） | soname 兼容 |
 
 ## 构建容器
@@ -85,12 +88,12 @@ sudo apt install libreadline7
 
 | 包 | 来源 | 说明 |
 | ---- | ------ | ------ |
-| gcc-toolset-12 | AlmaLinux 8 AppStream | C++20 编译器 |
+| gcc-toolset-14 | AlmaLinux 8 AppStream | C++20 编译器 |
 | cmake ≥ 3.28 | [官方二进制](https://github.com/Kitware/CMake/releases) | 构建系统，不依赖系统 repo |
 | bison ≥ 3.8 | [GNU FTP](https://ftp.gnu.org/gnu/bison/) | 自编译安装 |
 | flex ≥ 2.6 | AppStream | 词法分析器 |
-| ninja-build | AppStream | 构建后端 |
-| python38 | AppStream | 代码生成 |
+| ninja ≥ 1.10 | [官方二进制](https://github.com/ninja-build/ninja/releases) | 构建后端（0.68 多输出 depslog 需要 1.10+） |
+| python39 + pybind11/cxxheaderparser | AppStream + pip | Pyosys 代码生成（generator.py 需 ≥ 3.9） |
 | readline-devel | AppStream | 命令行编辑 |
 | tcl-devel | AppStream | Tcl 脚本 |
 | zlib-devel | AppStream | 压缩库 |
@@ -103,7 +106,7 @@ sudo apt install libreadline7
 docker run --rm -v "$(pwd):/work" -w /work almalinux:8 \
     bash -c "
         bash scripts/install-deps.sh &&
-        bash scripts/build.sh v0.67
+        bash scripts/build.sh v0.68
     "
 ```
 
