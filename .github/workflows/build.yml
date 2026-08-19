@@ -85,7 +85,7 @@ jobs:
           | Tcl | `tcl` | `tcl8.6` |
           | zlib | `zlib` | `zlib1g` |
           | libffi | `libffi` | `libffi6` |
-          | Python | `python38` | `libpython3.8` |
+          | Python | `python39` | `libpython3.9` |
           ENDOFFILE
           # Replace placeholder
           sed -i "s/TAG_PLACEHOLDER/${TAG}/g" dist/release.md

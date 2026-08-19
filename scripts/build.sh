@@ -68,7 +68,7 @@ fpm -s dir -t rpm \
 	--depends tcl \
 	--depends zlib \
 	--depends libffi \
-	--depends python38 \
+	--depends python39 \
 	-p "${DIST_DIR}/yosys-${VERSION}-1.el8.x86_64.rpm" \
 	-C "${STAGING_DIR}" usr/
 
@@ -86,7 +86,7 @@ fpm -s dir -t deb \
 	--depends tcl8.6 \
 	--depends zlib1g \
 	--depends libffi6 \
-	--depends libpython3.8 \
+	--depends libpython3.9 \
 	-p "${DIST_DIR}/yosys-${VERSION}-1_amd64.deb" \
 	-C "${STAGING_DIR}" usr/
 

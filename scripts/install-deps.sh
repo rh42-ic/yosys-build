@@ -17,9 +17,9 @@ dnf install -y \
 	m4 \
 	ninja-build \
 	pkgconfig \
-	python38 \
-	python38-devel \
-	python38-pip \
+	python39 \
+	python39-devel \
+	python39-pip \
 	ruby \
 	rubygems \
 	tar \
@@ -37,8 +37,8 @@ dnf install -y \
 	rpm-build \
 	dpkg-dev
 
-# ----- Python deps for Pyosys (yosys FindPyosysEnv requires pybind11 + cxxheaderparser on the host interpreter) -----
-python3.8 -m pip install --no-cache-dir 'pybind11>=3,<4' cxxheaderparser
+# ----- Python deps for Pyosys (yosys FindPyosysEnv requires pybind11 + cxxheaderparser on the host interpreter; pyosys/generator.py needs Python >= 3.9) -----
+python3.9 -m pip install --no-cache-dir 'pybind11>=3,<4' cxxheaderparser
 
 # ----- Install CMake from official binary (repo CMake 3.20 is too old) -----
 CMAKE_VERSION=3.31.6
@@ -73,4 +73,5 @@ g++ --version | head -1
 cmake --version | head -1
 bison --version | head -1
 flex --version | head -1
-python3 --version
+python3.9 --version
+python3.9 -m pybind11 --version
