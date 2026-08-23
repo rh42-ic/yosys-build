@@ -12,6 +12,7 @@ dnf install -y \
 	gcc-toolset-14-gcc \
 	gcc-toolset-14-gcc-c++ \
 	gcc-toolset-14-binutils \
+	gawk \
 	flex \
 	git \
 	make \

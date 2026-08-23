@@ -62,6 +62,9 @@ cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
 
 cmake --build "${BUILD_DIR}" -j"$(nproc)"
 
+# ----- Functional check (same as yosys' official test-compile CI step) -----
+"${BUILD_DIR}/yosys" -p "read_verilog -sv ${SRC_DIR}/tests/simple/always01.v; synth -run coarse;"
+
 # ----- Build 2: pyosys Python module (python-only build, same pattern as upstream wheels) -----
 # YOSYS_INSTALL_PYTHON_SITEDIR is set to the RHEL-style purelib path
 # (/usr/lib/python3.9/site-packages, where EL8's python39 looks). Debian
