@@ -1,8 +1,14 @@
 build/
 build-pyosys/
+build-win/
 staging/
 staging-pyosys/
+staging-win/
+pkg-win/
 dist/
 yosys-src/
+
 *.rpm
 *.deb
+*.zip
+staging-deb-pyosys/

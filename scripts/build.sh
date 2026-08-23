@@ -13,6 +13,7 @@ BUILD_DIR="${SCRIPT_DIR}/../build"
 BUILD_PY_DIR="${SCRIPT_DIR}/../build-pyosys"
 STAGING_DIR="${SCRIPT_DIR}/../staging"
 STAGING_PY_DIR="${SCRIPT_DIR}/../staging-pyosys"
+STAGING_DEB_PY_DIR="${SCRIPT_DIR}/../staging-deb-pyosys"
 DIST_DIR="${SCRIPT_DIR}/../dist"
 SRC_DIR="${SCRIPT_DIR}/../yosys-src"
 
@@ -27,6 +28,11 @@ if [ ! -d "${SRC_DIR}" ]; then
 fi
 
 # ----- Common flags -----
+# pkg-config does not search /usr/local/lib/pkgconfig by default; without this,
+# yosys links the distro readline (so.7) / libffi (so.6) instead of our static
+# /usr/local builds, breaking DEB on distros whose libffi soname differs (so.7+).
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 CFLAGS="-march=x86-64-v3 -mtune=generic -O3 -fno-math-errno -fno-trapping-math"
 CXXFLAGS="${CFLAGS}"
 LDFLAGS="-static-libgcc -static-libstdc++ -Wl,--as-needed -Wl,-z,relro -Wl,-z,now"
@@ -36,13 +42,14 @@ COMMON_CMAKE_ARGS=(
 	-DCMAKE_C_COMPILER=gcc
 	-DCMAKE_CXX_COMPILER=g++
 	-DCMAKE_INSTALL_PREFIX=/usr
-	-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
 	-DCMAKE_C_FLAGS="${CFLAGS}"
 	-DCMAKE_CXX_FLAGS="${CXXFLAGS}"
 	-DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}"
-	-DYOSYS_USE_BUNDLED_LIBS=ON
-	-DBUILD_SHARED_LIBS=OFF
 )
+# Note: same configure options as yosys' official CI (no LTO, no
+# YOSYS_USE_BUNDLED_LIBS - that option is unused in v0.68 anyway, no
+# BUILD_SHARED_LIBS - the default is OFF). The static readline/libffi and the
+# new toolchain are supplied via PKG_CONFIG_PATH / PATH, not via CMake flags.
 
 # ----- Build 1: main binary, WITHOUT python -----
 # With YOSYS_WITH_PYTHON=ON the yosys driver links libpython directly, which would
@@ -56,8 +63,10 @@ cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
 cmake --build "${BUILD_DIR}" -j"$(nproc)"
 
 # ----- Build 2: pyosys Python module (python-only build, same pattern as upstream wheels) -----
-# YOSYS_INSTALL_PYTHON_SITEDIR uses the purelib path, valid on both EL8
-# (/usr/lib64 + /usr/lib site-packages) and Debian 11 (/usr/lib).
+# YOSYS_INSTALL_PYTHON_SITEDIR is set to the RHEL-style purelib path
+# (/usr/lib/python3.9/site-packages, where EL8's python39 looks). Debian
+# python3 does NOT search that path (it uses /usr/lib/python3/dist-packages),
+# so the DEB is repacked from a Debian-layout staging below.
 rm -rf "${BUILD_PY_DIR}"
 cmake -B "${BUILD_PY_DIR}" -S "${SRC_DIR}" \
 	"${COMMON_CMAKE_ARGS[@]}" \
@@ -136,7 +145,14 @@ fpm -s dir -t rpm \
 	-p "${DIST_DIR}/yosys-python-${VERSION}-${ITERATION}.el8.x86_64.rpm" \
 	-C "${STAGING_PY_DIR}" usr/
 
-# DEB: python3-yosys (Debian 11 / python3.9)
+# DEB: python3-yosys (Debian 11 / python3.9). Debian's python3 only searches
+# /usr/lib/python3/dist-packages, not the RHEL-style site-packages path, so
+# repack the module into a Debian-layout staging tree.
+rm -rf "${STAGING_DEB_PY_DIR}"
+mkdir -p "${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages"
+cp -a "${STAGING_PY_DIR}/usr/lib/python3.9/site-packages/pyosys" \
+	"${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages/"
+
 fpm -s dir -t deb \
 	-n python3-yosys \
 	-v "${VERSION}" \
@@ -154,7 +170,7 @@ fpm -s dir -t deb \
 	--depends libncursesw6 \
 	--depends libtinfo6 \
 	-p "${DIST_DIR}/python3-yosys-${VERSION}-${ITERATION}_amd64.deb" \
-	-C "${STAGING_PY_DIR}" usr/
+	-C "${STAGING_DEB_PY_DIR}" usr/
 
 # ----- Print summary -----
 echo ""

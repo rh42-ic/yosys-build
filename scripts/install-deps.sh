@@ -113,7 +113,12 @@ includedir=${prefix}/include
 Name: Readline
 Description: GNU Readline library (statically linked)
 Version: 8.2
-Libs: ${libdir}/libreadline.a -lncursesw -ltinfo
+# Use -lreadline (not an absolute path to libreadline.a): CMake's
+# pkg_check_modules places absolute-path archives before the object
+# files on the link line, where a static archive is never consulted.
+# /usr/local/lib has no libreadline.so (built --disable-shared), so
+# -lreadline resolves to the static archive.
+Libs: -L${libdir} -lreadline -lncursesw -ltinfo
 Cflags: -I${includedir}
 EOF
 fi
@@ -134,12 +139,10 @@ if [ ! -f /usr/local/lib/libffi.a ]; then
 	make install
 	popd
 	rm -rf "/tmp/libffi-${LIBFFI_VERSION}" /tmp/libffi.tar.gz
-	# Force static library in all situations (same trick as YosysHQ wheels)
-	sed -i 's|-L${toolexeclibdir} -lffi|${toolexeclibdir}/libffi.a|' /usr/local/lib/pkgconfig/libffi.pc
-	grep -q 'libffi\.a' /usr/local/lib/pkgconfig/libffi.pc || {
-		echo "ERROR: libffi.pc patch failed" >&2
-		exit 1
-	}
+	# Keep the pkg-config file as generated: it already uses `-L${toolexeclibdir} -lffi`.
+	# The absolute-path form would be placed before the objects by CMake's
+	# pkg_check_modules (static archive never consulted -> undefined refs).
+	# -lffi resolves to libffi.a because --disable-shared left no libffi.so.
 fi
 
 # ----- fpm for packaging (v1.15 last to support Ruby 2.5) -----
@@ -153,5 +156,5 @@ bison --version | head -1
 flex --version | head -1
 python3.9 --version
 python3.9 -m pybind11 --version
-echo "readline: $(pkg-config --modversion readline) (static)"
-echo "libffi: $(pkg-config --modversion libffi) (static)"
+echo "readline: $(PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --modversion readline) (static)"
+echo "libffi: $(PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --modversion libffi) (static)"

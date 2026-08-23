@@ -1,0 +1,17 @@
+---
+# yamllint config for GitHub Actions workflows.
+# Workflow YAML legitimately contains long shell one-liners and long URLs
+# (action SHAs, download links); the 80-column default does not apply.
+# `on:` is a YAML 1.1 truthy key but required by GitHub Actions.
+extends: default
+rules:
+  line-length:
+    max: 120
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  document-start:
+    present: false
+  truthy:
+    check-keys: false
+  comments-indentation: disable

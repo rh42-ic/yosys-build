@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Build yosys for Windows x86_64 inside the MSYS2 MINGW64 environment and
+# package a portable zip.
+#
+# The build mirrors yosys' own official CI job (.github/workflows/extra-builds.yml,
+# mingw-build): MSYS2 MINGW64, distro packages (tcl 8.6, libffi, zlib...), plain
+# Release cmake with no LTO (LTO conflicts with MINGW --export-all-symbols).
+# Packaging follows OSS CAD Suite: ALL runtime DLLs bundled into lib/, so the
+# zip has zero system dependencies.
+set -euo pipefail
+
+TAG="${1:?Usage: $0 <yosys-git-tag>}"
+VERSION="${TAG#v}"
+# Package iteration: bump when repackaging the same upstream version
+ITERATION=1
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="${SCRIPT_DIR}/.."
+BUILD_DIR="${ROOT_DIR}/build-win"
+STAGING_DIR="${ROOT_DIR}/staging-win"
+PKG_DIR="${ROOT_DIR}/pkg-win"
+DIST_DIR="${ROOT_DIR}/dist"
+SRC_DIR="${ROOT_DIR}/yosys-src"
+PKG_ROOT_DIR="yosys-${VERSION}-win64"
+
+# ----- Clone yosys (shared with the Linux build script) -----
+if [ ! -d "${SRC_DIR}" ]; then
+	git clone --branch "${TAG}" \
+		--depth 1 --recurse-submodules --shallow-submodules \
+		https://github.com/YosysHQ/yosys.git "${SRC_DIR}"
+fi
+
+# ----- Configure and build (same options as the official mingw-build CI job) -----
+# Windows needs no static linking (unlike the Linux packages): every runtime
+# DLL is bundled into lib/, so the zip has zero system dependencies.
+rm -rf "${BUILD_DIR}"
+cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DCMAKE_INSTALL_PREFIX=/usr/local \
+	-DYOSYS_USE_BUNDLED_LIBS=ON \
+	-DBUILD_SHARED_LIBS=OFF \
+	-DYOSYS_WITH_PYTHON=OFF
+
+cmake --build "${BUILD_DIR}" -j"$(nproc)"
+
+# ----- Install to staging -----
+rm -rf "${STAGING_DIR}"
+DESTDIR="${STAGING_DIR}" cmake --install "${BUILD_DIR}" --strip
+
+# ----- Assemble portable package -----
+rm -rf "${PKG_DIR}"
+mkdir -p "${PKG_DIR}/${PKG_ROOT_DIR}/bin"
+mkdir -p "${PKG_DIR}/${PKG_ROOT_DIR}/lib"
+mkdir -p "${PKG_DIR}/${PKG_ROOT_DIR}/share"
+
+# Executables and techlibs. yosys (MINGW, YOSYS_WIN32_UNIX_DIR) locates
+# share/ relative to the exe: <exe>/share or <exe>/../share/yosys
+cp "${STAGING_DIR}/usr/local/bin/"*.exe "${PKG_DIR}/${PKG_ROOT_DIR}/bin/"
+cp -r "${STAGING_DIR}/usr/local/share/yosys" "${PKG_DIR}/${PKG_ROOT_DIR}/share/"
+
+# ALL MINGW64 runtime DLLs (like OSS CAD Suite: copy everything, miss nothing).
+shopt -s nullglob
+cp /mingw64/bin/"*.dll" "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
+shopt -u nullglob
+
+# Tcl library data (init.tcl, encodings, msgcat...) for the bundled tcl DLL
+cp -r /mingw64/lib/tcl8.6 "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
+
+# Environment launchers and README
+cat >"${PKG_DIR}/${PKG_ROOT_DIR}/environment.bat" <<'EOF'
+@echo off
+rem Add yosys to PATH and point Tcl at the bundled library data
+set "YOSYS_ROOT=%~dp0"
+set "PATH=%YOSYS_ROOT%bin;%YOSYS_ROOT%lib;%PATH%"
+set "TCL_LIBRARY=%YOSYS_ROOT%lib\tcl8.6"
+EOF
+
+cat >"${PKG_DIR}/${PKG_ROOT_DIR}/environment.ps1" <<'EOF'
+# Add yosys to PATH and point Tcl at the bundled library data
+$env:YOSYS_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
+$env:PATH = "$env:YOSYS_ROOT\bin;$env:YOSYS_ROOT\lib;$env:PATH"
+$env:TCL_LIBRARY = "$env:YOSYS_ROOT\lib\tcl8.6"
+EOF
+
+cat >"${PKG_DIR}/${PKG_ROOT_DIR}/start.bat" <<'EOF'
+@echo off
+cmd /k "%~dp0environment.bat"
+EOF
+
+cat >"${PKG_DIR}/${PKG_ROOT_DIR}/README.md" <<EOF
+# Yosys ${VERSION} (Windows x64)
+
+Portable build for Windows 10/11 (x86_64). No installer, no system
+dependencies: everything needed is inside this directory.
+
+## Usage
+
+Double-click \`start.bat\` (or run \`environment.bat\`) to open a shell with
+\`yosys\` on PATH, then:
+
+    yosys -p "synth -top top" top.v
+
+Or call the binary directly from any shell:
+
+    bin\\yosys.exe -V
+
+## Features
+
+- yosys driver, yosys-abc, full techlibs, Tcl 8.6 (SDC support)
+- All runtime DLLs bundled (zero system dependencies)
+- No Python bindings (pyosys is Linux-only in this project)
+
+## Layout
+
+| Path            | Contents                            |
+|-----------------|-------------------------------------|
+| bin\\yosys.exe  | main binary                         |
+| bin\\yosys-abc.exe | ABC logic synthesis engine       |
+| share\\yosys    | techlibs, plugins data              |
+| lib\\           | bundled DLLs and Tcl library data   |
+
+Built from [YosysHQ/yosys ${TAG}](https://github.com/YosysHQ/yosys/releases/tag/${TAG})
+with MSYS2 MINGW64 (GCC), same toolchain as yosys' official CI.
+EOF
+
+# ----- Verify: every non-system DLL must be bundled in lib/ -----
+# (the copy-all step above already provides them; this guards against a DLL
+# that lives outside /mingw64/bin)
+SYSTEM_DLLS='KERNEL32.dll USER32.dll GDI32.dll ADVAPI32.dll SHELL32.dll ole32.dll OLEAUT32.dll WS2_32.dll NETAPI32.dll msvcrt.dll VERSION.dll COMDLG32.dll SHLWAPI.dll WINMM.dll IMM32.dll UxTheme.dll dwmapi.dll IPHLPAPI.dll CRYPT32.dll RPCRT4.dll SETUPAPI.dll COMCTL32.dll WINSPOOL.DRV WLDAP32.dll DNSAPI.dll SECUR32.dll NTDLL.DLL api-ms-win- ext-ms-win-' # typos:ignore-line (Windows API/DLL names)
+
+check_binary_dlls() {
+	local bin="$1"
+	echo "--- DLL dependencies of $(basename "$bin") ---"
+	local deps
+	deps=$(objdump -p "$bin" | awk '/DLL Name:/{print $3}')
+	echo "$deps"
+	while read -r dll; do
+		[ -z "$dll" ] && continue
+		in_system=false
+		for pat in $SYSTEM_DLLS; do
+			if [[ "$dll" == "$pat"* ]]; then
+				in_system=true
+				break
+			fi
+		done
+		if ! $in_system && [ ! -f "${PKG_DIR}/${PKG_ROOT_DIR}/lib/$dll" ]; then
+			echo "FAIL: $bin needs $dll but it is not bundled in lib/"
+			exit 1
+		fi
+	done <<<"$deps"
+	echo "OK: $(basename "$bin") runtime dependencies are satisfied"
+}
+
+check_binary_dlls "${PKG_DIR}/${PKG_ROOT_DIR}/bin/yosys.exe"
+check_binary_dlls "${PKG_DIR}/${PKG_ROOT_DIR}/bin/yosys-abc.exe"
+
+# ----- Package -----
+mkdir -p "${DIST_DIR}"
+rm -f "${DIST_DIR}/yosys-${VERSION}-${ITERATION}-windows-x64.zip"
+cd "${PKG_DIR}"
+zip -qr "${DIST_DIR}/yosys-${VERSION}-${ITERATION}-windows-x64.zip" "${PKG_ROOT_DIR}"
+cd "${ROOT_DIR}"
+
+echo "=== Windows package ==="
+ls -lh "${DIST_DIR}/yosys-${VERSION}-${ITERATION}-windows-x64.zip"

@@ -8,6 +8,7 @@
 
 - `yosys-{version}-N.el8.x86_64.rpm` + `yosys-python-{version}-N.el8.x86_64.rpm`（RHEL 8/9、AlmaLinux、Rocky Linux）
 - `yosys-{version}-N_amd64.deb` + `python3-yosys-{version}-N_amd64.deb`（Ubuntu 20.04+、Debian 10+）
+- `yosys-{version}-N-windows-x64.zip`（**Windows 10/11**，便携免安装，零系统依赖）
 
 `yosys-python` / `python3-yosys` 为可选的 Pyosys（Python 3.9 绑定）子包，不装也可正常使用 yosys。
 
@@ -20,6 +21,9 @@
 | **RHEL** | 8+ | 主要目标平台 |
 | **Ubuntu** | 20.04+ | Ubuntu 18.04 的 glibc 是 2.27，无法运行 |
 | **Debian** | 10+ | |
+| **Windows** | 10 / 11 x64 | 便携 zip；解压后运行 `start.bat`，全部 DLL 已内置 |
+
+> Windows 包面向 PC 用户，不做老系统兼容；官方（OSS CAD Suite）同样只承诺 Windows 10/11。
 
 ### Pyosys 子包说明
 
@@ -49,6 +53,7 @@ Pyosys 子包额外依赖 `python39-libs`（RPM）/ `libpython3.9`（DEB）。
 | libstdc++、libgcc | C/C++ 运行时 |
 | readline 8.2 | 交互式命令行（源码自编译，避免 soname 跨发行版不兼容） |
 | libffi 3.4.8 | 外部函数接口（源码自编译，与上游 wheels 同款做法） |
+
 | ABC | 逻辑综合引擎 |
 | fmt, json11, fst, bigint, slang… | 第三方 bundled 库 |
 
@@ -102,12 +107,27 @@ Pyosys 子包额外依赖 `python39-libs`（RPM）/ `libpython3.9`（DEB）。
 | tcl-devel / zlib-devel / ncurses-devel | AppStream | Tcl 脚本 / 压缩 / 终端 |
 | ruby + fpm | AppStream + gem | 打 RPM/DEB 包 |
 
+## Windows 构建（MSYS2 MINGW64）
+
+Windows 包在 `windows-latest` runner 的 **MSYS2 MINGW64** 环境中原生构建（与 yosys 官方 CI 的 `mingw-build` job 完全同工具链），打包方式与 OSS CAD Suite 一致：
+
+| 组件 | 来源 | 说明 |
+| ---- | ------ | ------ |
+| GCC | MSYS2 MINGW64（官方 CI 同款） | 官方 CI 每日验证的构建路径 |
+| tcl 8.6 / libffi / zlib / python | MSYS2 mingw-w64-x86_64 包 | 与官方 mingw-build job 的包列表一致 |
+| 构建参数 | `-DCMAKE_BUILD_TYPE=Release` | 照抄官方；不开 LTO（LTO 与 MINGW 符号导出冲突） |
+| 全部运行时 DLL | `/mingw64/bin/*.dll` 全量拷入 `lib/` | OSS CAD Suite 同款：宁可多带，不漏一个 |
+
+Windows 不需要静态链接（Linux 才需要）：zip 内 DLL 全量自带，**零系统依赖**。产物为便携 zip（`yosys-{version}-N-windows-x64.zip`）：`bin/`（yosys.exe、yosys-abc.exe）、`share/yosys`（techlibs）、`lib/`（DLL + tcl 数据），附 `start.bat` / `environment.bat` / `environment.ps1` 环境脚本。不含 pyosys（官方 Windows wheel 亦不支持，`.pyd` 命名问题）。
+
 ## CI 验证
 
 workflow 在发布前自动执行：
 
 1. `verify-rpm`：在干净的 `almalinux:8` 容器中 `dnf install` 安装 RPM（校验依赖名可从仓库解析），检查 glibc 上限 ≤ 2.28、动态依赖仅为 tcl/zlib/ncursesw，并运行综合冒烟测试
 2. `verify-deb`：在 `debian:11` 容器中 `apt-get install` 安装 DEB（含 pyosys 子包），运行综合冒烟测试与 `import pyosys` 测试
+3. `verify-win`：在 `windows-latest` 上解压 zip，运行 yosys.exe 综合冒烟测试、Tcl 检查（验证打包的 TCL_LIBRARY）与 yosys-abc
+4. 独立 `release` job：全部构建与验证通过后才发布（rpm + deb + zip 统一 release）
 
 也可通过 **workflow_dispatch** 手动指定 tag 重新构建（如修复打包问题后重发）。
 
@@ -120,6 +140,8 @@ docker run --rm -v "$(pwd):/work" -w /work almalinux:8 \
         bash scripts/build.sh v0.68
     "
 ```
+
+Windows 包在 GitHub Actions 的 `windows-latest` runner（MSYS2 MINGW64）上构建，本地如需复现请参考 workflow 的 `build-win` job。
 
 ## 许可
 

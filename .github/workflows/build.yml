@@ -11,11 +11,14 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    name: Build ${{ github.ref_name }}
+    name: Build Linux packages (${{ github.ref_name }})
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-latest
     container:
       image: almalinux:8
@@ -23,7 +26,7 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Checkout yosys-build
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install build dependencies
         run: bash scripts/install-deps.sh
@@ -149,20 +152,13 @@ jobs:
           done
 
       - name: Upload packages as artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: yosys-packages
           path: dist/
           retention-days: 1
-
-      - name: Create release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: |
-            dist/*.rpm
-            dist/*.deb
-          body_path: dist/release.md
-          generate_release_notes: false
+      # Release creation moved to the dedicated `release` job, which waits for
+      # all builds (Linux + Windows) and all verification jobs to pass.
 
   verify-rpm:
     name: Verify RPM on clean AlmaLinux 8
@@ -172,7 +168,7 @@ jobs:
       image: almalinux:8
     steps:
       - name: Download packages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: yosys-packages
           path: dist
@@ -187,9 +183,13 @@ jobs:
             [ -e "$bin" ] || { echo "FAIL: missing $bin"; exit 1; }
             max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
             echo "$bin -> max symbol $max"
-            [ "$max" = "GLIBC_2.28" ] || { echo "FAIL: glibc requirement too new"; exit 1; }
+            # ceiling check: max symbol must be <= 2.28 (a lower symbol like 2.27 is fine)
+            if [ "$(printf '%s\n' "$max" 'GLIBC_2.28' | sort -V | tail -1)" != "GLIBC_2.28" ]; then
+              echo "FAIL: glibc requirement too new ($max > GLIBC_2.28)"
+              exit 1
+            fi
           done
-          echo "OK: glibc ceiling is 2.28"
+          echo "OK: glibc ceiling is <= 2.28"
 
       - name: Check dynamic dependencies (no readline/libffi/python/libstdc++)
         run: |
@@ -202,14 +202,13 @@ jobs:
 
       - name: Smoke test
         run: |
-          /usr/bin/yosys -V
-          /usr/bin/yosys -q -p 'read_verilog -sv <<EOF
+          cat > /tmp/top.sv << 'EOF'
           module top(input logic a, input logic b, output logic y);
             assign y = a & b;
           endmodule
           EOF
-          synth -top top
-          stat'
+          /usr/bin/yosys -V
+          /usr/bin/yosys -q -p 'read_verilog -sv /tmp/top.sv; synth -top top; stat'
 
   verify-deb:
     name: Verify DEB on Debian 11
@@ -219,7 +218,7 @@ jobs:
       image: debian:11
     steps:
       - name: Download packages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: yosys-packages
           path: dist
@@ -231,20 +230,170 @@ jobs:
 
       - name: Smoke test yosys
         run: |
-          yosys -V
-          yosys -q -p 'read_verilog -sv <<EOF
+          cat > /tmp/top.sv << 'EOF'
           module top(input logic a, input logic b, output logic y);
             assign y = a & b;
           endmodule
           EOF
-          synth -top top
-          stat'
+          yosys -V
+          yosys -q -p 'read_verilog -sv /tmp/top.sv; synth -top top; stat'
 
       - name: Smoke test pyosys
         run: |
+          apt-get install -y python3
           python3 -c "
           from pyosys import libyosys as ys
           d = ys.Design()
           ys.run_pass('help', d)
           print('pyosys OK:', ys.__file__)
           "
+
+  build-win:
+    name: Build Windows package (${{ github.ref_name }})
+    permissions:
+      contents: read
+      actions: write
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout yosys-build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Same toolchain as yosys' own official mingw-build CI job
+      # (.github/workflows/extra-builds.yml): MSYS2 MINGW64 with the distro
+      # packages (tcl 8.6, libffi, zlib...), so the build is known to work.
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            bison
+            flex
+            gawk
+            diffutils
+            make
+            zip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gtest
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-tcl
+            mingw-w64-x86_64-libffi
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-git
+
+      - name: Build yosys and package zip
+        shell: msys2 {0}
+        run: bash scripts/build-win.sh "$TAG"
+
+      - name: List packages
+        run: |
+          echo "=== Windows package ==="
+          ls -lh dist/
+
+      - name: Upload package as artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: yosys-win-package
+          path: dist/
+          retention-days: 1
+
+  verify-win:
+    name: Verify Windows package on Windows 11
+    runs-on: windows-latest
+    needs: build-win
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: yosys-win-package
+          path: winpkg
+
+      - name: Extract and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd winpkg
+          # bsdtar (bundled with Git for Windows) handles zip; unzip is not
+          # guaranteed on the runner
+          tar -xf yosys-*.zip
+          PKG=$(find . -maxdepth 1 -type d -name 'yosys-*-win64' | head -1)
+          [ -n "$PKG" ] || { echo "FAIL: package directory not found"; exit 1; }
+          cd "$PKG"
+          export PATH="$PWD/bin:$PWD/lib:$PATH"
+          export TCL_LIBRARY="$PWD/lib/tcl8.6"
+
+          echo "--- yosys version ---"
+          ./bin/yosys.exe -V
+
+          echo "--- synth smoke test (verifies share/ techlibs layout) ---"
+          cat > top.sv << 'EOF'
+          module top(input logic a, input logic b, output logic y);
+            assign y = a & b;
+          endmodule
+          EOF
+          ./bin/yosys.exe -q -p 'read_verilog -sv top.sv; synth -top top; stat'
+
+          echo "--- Tcl check (verifies bundled TCL_LIBRARY) ---"
+          # yosys' tcl pass executes a script FILE, not an inline command
+          cat > check.tcl << 'EOF'
+          puts "TCL OK [info patchlevel] $tcl_library"
+          EOF
+          ./bin/yosys.exe -q -p "tcl check.tcl"
+
+          echo "--- yosys-abc check ---"
+          echo quit | ./bin/yosys-abc.exe
+
+          echo "OK: Windows package verified"
+
+  release:
+    name: Create release (${{ github.ref_name }})
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-latest
+    needs: [build, build-win, verify-rpm, verify-deb, verify-win]
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          pattern: yosys-*
+          merge-multiple: true
+
+      - name: Append Windows package listing to release notes
+        run: |
+          set -euo pipefail
+          ZIP=$(find dist -maxdepth 1 -name '*.zip' | head -1 || true)
+          if [ -n "$ZIP" ]; then
+            {
+              echo "### $(basename "$ZIP")"
+              echo '```'
+              unzip -l "$ZIP" | awk 'NR>3 {
+                name = $4
+                if (name ~ /\/$/) next
+                split(name, a, "/")
+                counts[a[2]]++
+              }
+              END {
+                for (d in counts)
+                  printf "  %s/  (%d files)\n", d, counts[d]
+              }' | sort
+              echo '```'
+              echo ""
+            } >> dist/release.md
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist/*.rpm
+            dist/*.deb
+            dist/*.zip
+          body_path: dist/release.md
+          generate_release_notes: false
