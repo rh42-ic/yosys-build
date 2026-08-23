@@ -3,6 +3,12 @@ name: Build Yosys Packages
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Yosys git tag to build (e.g. v0.68)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,47 +19,35 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: almalinux:8
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Checkout yosys-build
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: bash scripts/install-deps.sh
 
       - name: Build yosys and packages
-        env:
-          TAG: ${{ github.ref_name }}
         run: bash scripts/build.sh "$TAG"
 
-      - name: Verify packages
+      - name: List packages
         run: |
           echo "=== Packages ==="
           ls -lh dist/
-          echo ""
-          echo "=== RPM contents ==="
-          for pkg in dist/*.rpm; do
-            echo "--- $(basename "$pkg") ---"
-            rpm -qlp "$pkg" | head -30
-          done
-          echo ""
-          echo "=== DEB contents ==="
-          for pkg in dist/*.deb; do
-            echo "--- $(basename "$pkg") ---"
-            ar t "$pkg" | grep -q data.tar.xz && ar p "$pkg" data.tar.xz | tar tJ | head -30
-            ar t "$pkg" | grep -q data.tar.gz && ar p "$pkg" data.tar.gz | tar tz | head -30
-            ar t "$pkg" | grep -q data.tar.zst && ar p "$pkg" data.tar.zst | tar --zstd -t | head -30
-          done
-          echo ""
-          echo "=== Dynamic library requirements ==="
-          # Extract yosys binary from RPM to check ldd
-          rpm2cpio dist/*.rpm | cpio -idmu './usr/bin/yosys' 2>/dev/null
-          ldd usr/bin/yosys 2>/dev/null || true
 
       - name: Generate release notes
         run: |
-          TAG='${{ github.ref_name }}'
+          TAG='${{ env.TAG }}'
           cat > dist/release.md << 'ENDOFFILE'
           Based on [Yosys TAG_PLACEHOLDER](https://github.com/YosysHQ/yosys/releases/tag/TAG_PLACEHOLDER).
+
+          ## Packages
+
+          | Package | Contents |
+          |---------|----------|
+          | `yosys-*.rpm` / `yosys-*.deb` | yosys driver, yosys-abc, techlibs, Tcl integration |
+          | `yosys-python-*.rpm` / `python3-yosys-*.deb` | Pyosys Python 3.9 bindings (`import pyosys`), optional |
 
           ## Build Configuration
 
@@ -65,27 +59,37 @@ jobs:
           | `CMAKE_INTERPROCEDURAL_OPTIMIZATION` | `ON` (LTO) |
           | `YOSYS_USE_BUNDLED_LIBS` | `ON` |
           | `BUILD_SHARED_LIBS` | `OFF` |
-          | `YOSYS_WITH_PYTHON` | `ON` (Pyosys) |
+          | Pyosys | Separate `YOSYS_BUILD_PYTHON_ONLY` build (Python 3.9) |
           | Target CPU | `x86-64-v3` (Haswell 2013+) |
           | Float flags | `-fno-math-errno -fno-trapping-math` |
           | C/C++ runtime | Static (`-static-libgcc -static-libstdc++`) |
 
           ## System Requirements
 
-          - glibc ≥ 2.28 (RHEL 8+, Ubuntu 18.04+, Debian 10+)
+          - glibc ≥ 2.28 (RHEL 8+, AlmaLinux 8+, Rocky 8+, Ubuntu 20.04+, Debian 10+)
           - x86-64-v3 CPU (Intel Haswell 2013+ / AMD Excavator 2015+)
 
           ## Runtime Dependencies
 
-          The package manager will pull these automatically:
+          The package manager will pull these automatically.
+
+          Main package:
 
           | Library | RPM | DEB |
           |---------|-----|-----|
-          | readline | `readline` | `libreadline7` |
+          | glibc | `glibc >= 2.28` | `libc6 (>= 2.28)` |
           | Tcl | `tcl` | `tcl8.6` |
           | zlib | `zlib` | `zlib1g` |
-          | libffi | `libffi` | `libffi6` |
-          | Python | `python39` | `libpython3.9` |
+          | ncurses (termcap) | `ncurses-libs` | `libncursesw6`, `libtinfo6` |
+
+          Python subpackage additionally requires:
+
+          | Library | RPM | DEB |
+          |---------|-----|-----|
+          | Python 3.9 | `python39-libs` | `libpython3.9` |
+
+          Statically linked (no runtime dependency): readline 8.2, libffi 3.4.8,
+          libstdc++/libgcc, ABC, fmt, json11, fst, bigint, slang…
           ENDOFFILE
           # Replace placeholder
           sed -i "s/TAG_PLACEHOLDER/${TAG}/g" dist/release.md
@@ -144,6 +148,13 @@ jobs:
             echo "" >> dist/release.md
           done
 
+      - name: Upload packages as artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: yosys-packages
+          path: dist/
+          retention-days: 1
+
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -152,3 +163,88 @@ jobs:
             dist/*.deb
           body_path: dist/release.md
           generate_release_notes: false
+
+  verify-rpm:
+    name: Verify RPM on clean AlmaLinux 8
+    runs-on: ubuntu-latest
+    needs: build
+    container:
+      image: almalinux:8
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: yosys-packages
+          path: dist
+
+      - name: Install RPM packages (resolves dependencies from repos)
+        run: |
+          dnf install -y binutils ./dist/*.rpm
+
+      - name: Check glibc ceiling (must be <= 2.28)
+        run: |
+          for bin in /usr/bin/yosys /usr/bin/yosys-abc /usr/lib/python3.9/site-packages/pyosys/libyosys.so; do
+            [ -e "$bin" ] || { echo "FAIL: missing $bin"; exit 1; }
+            max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
+            echo "$bin -> max symbol $max"
+            [ "$max" = "GLIBC_2.28" ] || { echo "FAIL: glibc requirement too new"; exit 1; }
+          done
+          echo "OK: glibc ceiling is 2.28"
+
+      - name: Check dynamic dependencies (no readline/libffi/python/libstdc++)
+        run: |
+          ldd /usr/bin/yosys
+          if ldd /usr/bin/yosys | grep -E 'readline|libffi|libpython|stdc\+\+'; then
+            echo "FAIL: unexpected dynamic dependency"
+            exit 1
+          fi
+          echo "OK: only tcl/zlib/ncursesw remain dynamic"
+
+      - name: Smoke test
+        run: |
+          /usr/bin/yosys -V
+          /usr/bin/yosys -q -p 'read_verilog -sv <<EOF
+          module top(input logic a, input logic b, output logic y);
+            assign y = a & b;
+          endmodule
+          EOF
+          synth -top top
+          stat'
+
+  verify-deb:
+    name: Verify DEB on Debian 11
+    runs-on: ubuntu-latest
+    needs: build
+    container:
+      image: debian:11
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: yosys-packages
+          path: dist
+
+      - name: Install DEB packages (resolves dependencies from repos)
+        run: |
+          apt-get update
+          apt-get install -y ./dist/*.deb
+
+      - name: Smoke test yosys
+        run: |
+          yosys -V
+          yosys -q -p 'read_verilog -sv <<EOF
+          module top(input logic a, input logic b, output logic y);
+            assign y = a & b;
+          endmodule
+          EOF
+          synth -top top
+          stat'
+
+      - name: Smoke test pyosys
+        run: |
+          python3 -c "
+          from pyosys import libyosys as ys
+          d = ys.Design()
+          ys.run_pass('help', d)
+          print('pyosys OK:', ys.__file__)
+          "

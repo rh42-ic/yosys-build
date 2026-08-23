@@ -1,5 +1,7 @@
 build/
+build-pyosys/
 staging/
+staging-pyosys/
 dist/
 yosys-src/
 *.rpm
