@@ -59,9 +59,9 @@ jobs:
           | OS | AlmaLinux 8 (glibc 2.28) |
           | Compiler | GCC 14 |
           | `CMAKE_BUILD_TYPE` | `Release` |
-          | `CMAKE_INTERPROCEDURAL_OPTIMIZATION` | `ON` (LTO) |
-          | `YOSYS_USE_BUNDLED_LIBS` | `ON` |
-          | `BUILD_SHARED_LIBS` | `OFF` |
+          | LTO | Off (same as yosys official CI) |
+          | `YOSYS_USE_BUNDLED_LIBS` | Off (unused in v0.68) |
+          | `BUILD_SHARED_LIBS` | Off (CMake default) |
           | Pyosys | Separate `YOSYS_BUILD_PYTHON_ONLY` build (Python 3.9) |
           | Target CPU | `x86-64-v3` (Haswell 2013+) |
           | Float flags | `-fno-math-errno -fno-trapping-math` |

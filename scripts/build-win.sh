@@ -36,16 +36,26 @@ fi
 rm -rf "${BUILD_DIR}"
 cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" \
 	-DCMAKE_BUILD_TYPE=Release \
-	-DCMAKE_INSTALL_PREFIX=/usr/local \
-	-DYOSYS_USE_BUNDLED_LIBS=ON \
-	-DBUILD_SHARED_LIBS=OFF \
+	-DCMAKE_C_FLAGS=-w \
+	-DCMAKE_CXX_FLAGS=-w \
 	-DYOSYS_WITH_PYTHON=OFF
 
-cmake --build "${BUILD_DIR}" -j"$(nproc)"
+# Build quietly: third-party code (ABC...) emits lots of GCC warnings/notes.
+# Log to a file; only show the tail on failure.
+if ! cmake --build "${BUILD_DIR}" -j"$(nproc)" >/tmp/yosys-build-win.log 2>&1; then
+	echo "FAIL: yosys build failed, last lines of the log:"
+	tail -n 120 /tmp/yosys-build-win.log
+	exit 1
+fi
 
 # ----- Install to staging -----
+# Use --prefix (not DESTDIR): MSYS2 rewrites an absolute /usr/local prefix to
+# the MSYS2 install root, and DESTDIR then glues the two paths together
+# (staging-win/<msys2-root>/usr/local/...). --prefix is the install root
+# directly; the POSIX path is converted for the Windows cmake by MSYS2 as
+# usual, and installs land flat in <staging>/bin, <staging>/share, ...
 rm -rf "${STAGING_DIR}"
-DESTDIR="${STAGING_DIR}" cmake --install "${BUILD_DIR}" --strip
+cmake --install "${BUILD_DIR}" --strip --prefix "${STAGING_DIR}"
 
 # ----- Assemble portable package -----
 rm -rf "${PKG_DIR}"
@@ -55,12 +65,12 @@ mkdir -p "${PKG_DIR}/${PKG_ROOT_DIR}/share"
 
 # Executables and techlibs. yosys (MINGW, YOSYS_WIN32_UNIX_DIR) locates
 # share/ relative to the exe: <exe>/share or <exe>/../share/yosys
-cp "${STAGING_DIR}/usr/local/bin/"*.exe "${PKG_DIR}/${PKG_ROOT_DIR}/bin/"
-cp -r "${STAGING_DIR}/usr/local/share/yosys" "${PKG_DIR}/${PKG_ROOT_DIR}/share/"
+cp "${STAGING_DIR}/bin/"*.exe "${PKG_DIR}/${PKG_ROOT_DIR}/bin/"
+cp -r "${STAGING_DIR}/share/yosys" "${PKG_DIR}/${PKG_ROOT_DIR}/share/"
 
 # ALL MINGW64 runtime DLLs (like OSS CAD Suite: copy everything, miss nothing).
 shopt -s nullglob
-cp /mingw64/bin/"*.dll" "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
+cp /mingw64/bin/*.dll "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
 shopt -u nullglob
 
 # Tcl library data (init.tcl, encodings, msgcat...) for the bundled tcl DLL

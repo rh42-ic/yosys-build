@@ -33,7 +33,7 @@ fi
 # /usr/local builds, breaking DEB on distros whose libffi soname differs (so.7+).
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
-CFLAGS="-march=x86-64-v3 -mtune=generic -O3 -fno-math-errno -fno-trapping-math"
+CFLAGS="-march=x86-64-v3 -mtune=generic -O3 -w -fno-math-errno -fno-trapping-math"
 CXXFLAGS="${CFLAGS}"
 LDFLAGS="-static-libgcc -static-libstdc++ -Wl,--as-needed -Wl,-z,relro -Wl,-z,now"
 COMMON_CMAKE_ARGS=(
@@ -60,7 +60,13 @@ cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
 	"${COMMON_CMAKE_ARGS[@]}" \
 	-DYOSYS_WITH_PYTHON=OFF
 
-cmake --build "${BUILD_DIR}" -j"$(nproc)"
+# Build quietly: third-party code (ABC...) emits lots of GCC warnings/notes.
+# Log to a file; only show the tail on failure.
+if ! cmake --build "${BUILD_DIR}" -j"$(nproc)" >/tmp/yosys-build.log 2>&1; then
+	echo "FAIL: yosys build failed, last lines of the log:"
+	tail -n 120 /tmp/yosys-build.log
+	exit 1
+fi
 
 # ----- Functional check (same as yosys' official test-compile CI step) -----
 "${BUILD_DIR}/yosys" -p "read_verilog -sv ${SRC_DIR}/tests/simple/always01.v; synth -run coarse;"
@@ -80,7 +86,11 @@ cmake -B "${BUILD_PY_DIR}" -S "${SRC_DIR}" \
 	-DYOSYS_BUILD_PYTHON_ONLY=ON \
 	-DYOSYS_INSTALL_PYTHON_SITEDIR=/usr/lib/python3.9/site-packages
 
-cmake --build "${BUILD_PY_DIR}" -j"$(nproc)"
+if ! cmake --build "${BUILD_PY_DIR}" -j"$(nproc)" >/tmp/yosys-build-py.log 2>&1; then
+	echo "FAIL: pyosys build failed, last lines of the log:"
+	tail -n 120 /tmp/yosys-build-py.log
+	exit 1
+fi
 
 # ----- Install to staging -----
 rm -rf "${STAGING_DIR}" "${STAGING_PY_DIR}"
