@@ -116,9 +116,9 @@ Windows 包在 `windows-latest` runner 的 **MSYS2 MINGW64** 环境中原生构�
 | GCC | MSYS2 MINGW64（官方 CI 同款） | 官方 CI 每日验证的构建路径 |
 | tcl 8.6 / libffi / zlib / python | MSYS2 mingw-w64-x86_64 包 | 与官方 mingw-build job 的包列表一致 |
 | 构建参数 | `-DCMAKE_BUILD_TYPE=Release` | 照抄官方；不开 LTO（LTO 与 MINGW 符号导出冲突） |
-| 全部运行时 DLL | `/mingw64/bin/*.dll` 全量拷入 `lib/` | OSS CAD Suite 同款：宁可多带，不漏一个 |
+| 全部运行时 DLL | `/mingw64/bin/*.dll` 全量拷入 `bin/` | OSS CAD Suite 同款：宁可多带，不漏一个；Windows 加载器只搜索 exe 所在目录，DLL 必须与 exe 同目录 |
 
-Windows 不需要静态链接（Linux 才需要）：zip 内 DLL 全量自带，**零系统依赖**。产物为便携 zip（`yosys-{version}-N-windows-x64.zip`）：`bin/`（yosys.exe、yosys-abc.exe）、`share/yosys`（techlibs）、`lib/`（DLL + tcl 数据），附 `start.bat` / `environment.bat` / `environment.ps1` 环境脚本。不含 pyosys（官方 Windows wheel 亦不支持，`.pyd` 命名问题）。
+Windows 不需要静态链接（Linux 才需要）：zip 内 DLL 全量自带，**零系统依赖**。产物为便携 zip（`yosys-{version}-N-windows-x64.zip`）：`bin/`（yosys.exe、yosys-abc.exe 及全部运行时 DLL）、`share/yosys`（techlibs）、`lib/`（tcl 8.6 数据），附 `start.bat` / `environment.bat` / `environment.ps1` 环境脚本。不含 pyosys（官方 Windows wheel 亦不支持，`.pyd` 命名问题）。
 
 ## CI 验证
 
@@ -126,7 +126,7 @@ workflow 在发布前自动执行：
 
 1. `verify-rpm`：在干净的 `almalinux:8` 容器中 `dnf install` 安装 RPM（校验依赖名可从仓库解析），检查 glibc 上限 ≤ 2.28、动态依赖仅为 tcl/zlib/ncursesw，并运行综合冒烟测试
 2. `verify-deb`：在 `debian:11` 容器中 `apt-get install` 安装 DEB（含 pyosys 子包），运行综合冒烟测试与 `import pyosys` 测试
-3. `verify-win`：在 `windows-latest` 上解压 zip，运行 yosys.exe 综合冒烟测试、Tcl 检查（验证打包的 TCL_LIBRARY）与 yosys-abc
+3. `verify-win`：在 `windows-latest` 上解压 zip，运行 yosys.exe 综合冒烟测试、Tcl 检查（验证打包的 TCL_LIBRARY）与 yosys-abc，并在仅含 System32 的精简 PATH 下复验自包含性
 4. 独立 `release` job：全部构建与验证通过后才发布（rpm + deb + zip 统一 release）
 
 也可通过 **workflow_dispatch** 手动指定 tag 重新构建（如修复打包问题后重发）。

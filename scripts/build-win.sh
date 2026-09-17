@@ -5,8 +5,8 @@
 # The build mirrors yosys' own official CI job (.github/workflows/extra-builds.yml,
 # mingw-build): MSYS2 MINGW64, distro packages (tcl 8.6, libffi, zlib...), plain
 # Release cmake with no LTO (LTO conflicts with MINGW --export-all-symbols).
-# Packaging follows OSS CAD Suite: ALL runtime DLLs bundled into lib/, so the
-# zip has zero system dependencies.
+# ALL runtime DLLs are bundled next to the executables in bin/ (same directory
+# as the exes), so the zip has zero system dependencies.
 set -euo pipefail
 
 TAG="${1:?Usage: $0 <yosys-git-tag>}"
@@ -32,7 +32,8 @@ fi
 
 # ----- Configure and build (same options as the official mingw-build CI job) -----
 # Windows needs no static linking (unlike the Linux packages): every runtime
-# DLL is bundled into lib/, so the zip has zero system dependencies.
+# DLL is bundled next to the executables in bin/, so the zip has zero system
+# dependencies.
 rm -rf "${BUILD_DIR}"
 cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" \
 	-DCMAKE_BUILD_TYPE=Release \
@@ -68,12 +69,15 @@ mkdir -p "${PKG_DIR}/${PKG_ROOT_DIR}/share"
 cp "${STAGING_DIR}/bin/"*.exe "${PKG_DIR}/${PKG_ROOT_DIR}/bin/"
 cp -r "${STAGING_DIR}/share/yosys" "${PKG_DIR}/${PKG_ROOT_DIR}/share/"
 
-# ALL MINGW64 runtime DLLs (like OSS CAD Suite: copy everything, miss nothing).
+# ALL MINGW64 runtime DLLs (copy everything, miss nothing). They must sit next
+# to the exes in bin/: the Windows loader searches the exe's own directory, not
+# a sibling lib/ (lib/ holds only Tcl library data).
 shopt -s nullglob
-cp /mingw64/bin/*.dll "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
+cp /mingw64/bin/*.dll "${PKG_DIR}/${PKG_ROOT_DIR}/bin/"
 shopt -u nullglob
 
 # Tcl library data (init.tcl, encodings, msgcat...) for the bundled tcl DLL
+# (data only; tcl86.dll itself is in bin/)
 cp -r /mingw64/lib/tcl8.6 "${PKG_DIR}/${PKG_ROOT_DIR}/lib/"
 
 # Environment launchers and README
@@ -122,18 +126,19 @@ Or call the binary directly from any shell:
 
 ## Layout
 
-| Path            | Contents                            |
-|-----------------|-------------------------------------|
-| bin\\yosys.exe  | main binary                         |
-| bin\\yosys-abc.exe | ABC logic synthesis engine       |
-| share\\yosys    | techlibs, plugins data              |
-| lib\\           | bundled DLLs and Tcl library data   |
+| Path                | Contents                              |
+|---------------------|---------------------------------------|
+| bin\\yosys.exe      | main binary                           |
+| bin\\yosys-abc.exe  | ABC logic synthesis engine            |
+| bin\\*.dll          | bundled MinGW runtime DLLs            |
+| share\\yosys        | techlibs, plugins data                |
+| lib\\tcl8.6         | Tcl 8.6 library data                  |
 
 Built from [YosysHQ/yosys ${TAG}](https://github.com/YosysHQ/yosys/releases/tag/${TAG})
 with MSYS2 MINGW64 (GCC), same toolchain as yosys' official CI.
 EOF
 
-# ----- Verify: every non-system DLL must be bundled in lib/ -----
+# ----- Verify: every non-system DLL must be bundled in bin/ -----
 # (the copy-all step above already provides them; this guards against a DLL
 # that lives outside /mingw64/bin)
 SYSTEM_DLLS='KERNEL32.dll USER32.dll GDI32.dll ADVAPI32.dll SHELL32.dll ole32.dll OLEAUT32.dll WS2_32.dll NETAPI32.dll msvcrt.dll VERSION.dll COMDLG32.dll SHLWAPI.dll WINMM.dll IMM32.dll UxTheme.dll dwmapi.dll IPHLPAPI.dll CRYPT32.dll RPCRT4.dll SETUPAPI.dll COMCTL32.dll WINSPOOL.DRV WLDAP32.dll DNSAPI.dll SECUR32.dll NTDLL.DLL api-ms-win- ext-ms-win-' # typos:ignore-line (Windows API/DLL names)
@@ -153,8 +158,8 @@ check_binary_dlls() {
 				break
 			fi
 		done
-		if ! $in_system && [ ! -f "${PKG_DIR}/${PKG_ROOT_DIR}/lib/$dll" ]; then
-			echo "FAIL: $bin needs $dll but it is not bundled in lib/"
+		if ! $in_system && [ ! -f "${PKG_DIR}/${PKG_ROOT_DIR}/bin/$dll" ]; then
+			echo "FAIL: $bin needs $dll but it is not bundled in bin/"
 			exit 1
 		fi
 	done <<<"$deps"

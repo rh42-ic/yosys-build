@@ -156,7 +156,7 @@ jobs:
         with:
           name: yosys-packages
           path: dist/
-          retention-days: 1
+          retention-days: 3
       # Release creation moved to the dedicated `release` job, which waits for
       # all builds (Linux + Windows) and all verification jobs to pass.
 
@@ -291,6 +291,7 @@ jobs:
         run: bash scripts/build-win.sh "$TAG"
 
       - name: List packages
+        shell: bash
         run: |
           echo "=== Windows package ==="
           ls -lh dist/
@@ -300,7 +301,7 @@ jobs:
         with:
           name: yosys-win-package
           path: dist/
-          retention-days: 1
+          retention-days: 3
 
   verify-win:
     name: Verify Windows package on Windows 11
@@ -350,6 +351,28 @@ jobs:
 
           echo "OK: Windows package verified"
 
+      - name: Self-containment check (clean PATH)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Verify the package works with ONLY System32 on PATH: the runner's own
+          # DLLs must not mask a missing bundled one. The exe must find its DLLs
+          # via its own directory and its techlibs via the exe-relative share path.
+          PKG=$(find winpkg -maxdepth 1 -type d -name 'yosys-*-win64' | head -1)
+          [ -n "$PKG" ] || { echo "FAIL: package directory not found"; exit 1; }
+          cd "$PKG"
+
+          cat > top.sv << 'EOF'
+          module top(input logic a, input logic b, output logic y);
+            assign y = a & b;
+          endmodule
+          EOF
+
+          env PATH="$(cygpath "$SYSTEMROOT")/System32" TCL_LIBRARY="$PWD/lib/tcl8.6" ./bin/yosys.exe -V
+          env PATH="$(cygpath "$SYSTEMROOT")/System32" TCL_LIBRARY="$PWD/lib/tcl8.6" ./bin/yosys.exe -q -p 'read_verilog -sv top.sv; synth -top top; stat'
+
+          echo "OK: package is self-contained with a clean PATH"
+
   release:
     name: Create release (${{ github.ref_name }})
     permissions:
@@ -373,10 +396,8 @@ jobs:
             {
               echo "### $(basename "$ZIP")"
               echo '```'
-              unzip -l "$ZIP" | awk 'NR>3 {
-                name = $4
-                if (name ~ /\/$/) next
-                split(name, a, "/")
+              unzip -l "$ZIP" | awk 'NR>3 && $4 != "" && $4 !~ /\/$/ {
+                split($4, a, "/")
                 counts[a[2]]++
               }
               END {
@@ -391,6 +412,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             dist/*.rpm
             dist/*.deb
