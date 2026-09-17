@@ -225,8 +225,16 @@ jobs:
 
       - name: Install DEB packages (resolves dependencies from repos)
         run: |
-          apt-get update
-          apt-get install -y ./dist/*.deb
+          ok=0
+          for i in 1 2 3; do
+            if apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y ./dist/*.deb; then
+              ok=1
+              break
+            fi
+            echo "APT attempt $i failed (transient Debian mirror sync?); retrying in 20s..."
+            sleep 20
+          done
+          [ "$ok" = 1 ]
 
       - name: Smoke test yosys
         run: |
@@ -319,9 +327,10 @@ jobs:
         run: |
           set -euo pipefail
           cd winpkg
-          # bsdtar (bundled with Git for Windows) handles zip; unzip is not
-          # guaranteed on the runner
-          tar -xf yosys-*.zip
+          # Git Bash's `tar` is GNU tar (cannot read zip). Use Windows' built-in
+          # bsdtar (libarchive) from System32, which handles zip.
+          TAR="$(cygpath "$SYSTEMROOT")/System32/tar.exe"
+          "$TAR" -xf yosys-*.zip
           PKG=$(find . -maxdepth 1 -type d -name 'yosys-*-win64' | head -1)
           [ -n "$PKG" ] || { echo "FAIL: package directory not found"; exit 1; }
           cd "$PKG"
