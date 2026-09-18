@@ -137,7 +137,7 @@ workflow 在发布前自动执行：
 docker run --rm -v "$(pwd):/work" -w /work almalinux:8 \
     bash -c "
         bash scripts/install-deps.sh &&
-        bash scripts/build.sh v0.68
+        bash scripts/build.sh v0.69
     "
 ```
 

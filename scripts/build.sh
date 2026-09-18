@@ -6,7 +6,7 @@ set -euo pipefail
 TAG="${1:?Usage: $0 <yosys-git-tag>}"
 VERSION="${TAG#v}"
 # Package iteration: bump when repackaging the same upstream version
-ITERATION=2
+ITERATION=1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/../build"
@@ -47,7 +47,7 @@ COMMON_CMAKE_ARGS=(
 	-DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}"
 )
 # Note: same configure options as yosys' official CI (no LTO, no
-# YOSYS_USE_BUNDLED_LIBS - that option is unused in v0.68 anyway, no
+# YOSYS_USE_BUNDLED_LIBS - not enabled upstream either (default OFF), no
 # BUILD_SHARED_LIBS - the default is OFF). The static readline/libffi and the
 # new toolchain are supplied via PKG_CONFIG_PATH / PATH, not via CMake flags.
 

@@ -45,7 +45,7 @@ dnf install -y \
 	dpkg-dev
 
 # ----- Python deps for Pyosys (yosys FindPyosysEnv requires pybind11 + cxxheaderparser on the host interpreter; pyosys/generator.py needs Python >= 3.9) -----
-python3.9 -m pip install --no-cache-dir 'pybind11>=3,<4' cxxheaderparser
+python3.9 -m pip install --no-cache-dir 'pybind11>=3,<4' 'cxxheaderparser>=1.4'
 
 # ----- Install CMake from official binary (repo CMake 3.20 is too old) -----
 CMAKE_VERSION=3.31.6
@@ -57,7 +57,7 @@ if ! cmake --version 2>/dev/null | grep -q "${CMAKE_VERSION}"; then
 	rm -f /tmp/cmake.tar.gz
 fi
 
-# ----- Install Ninja from official binary (repo ninja 1.9 fails on multi-output depslog used by yosys 0.68 pyosys) -----
+# ----- Install Ninja from official binary (repo ninja 1.9 fails on multi-output depslog used by pyosys) -----
 NINJA_VERSION=1.12.1
 NINJA_SHA256=6f98805688d19672bd699fbbfa2c2cf0fc054ac3df1f0e6a47664d963d530255
 if ! ninja --version 2>/dev/null | grep -q "${NINJA_VERSION}"; then

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Yosys git tag to build (e.g. v0.68)"
+        description: "Yosys git tag to build (e.g. v0.69)"
         required: true
         type: string
 
@@ -60,7 +60,7 @@ jobs:
           | Compiler | GCC 14 |
           | `CMAKE_BUILD_TYPE` | `Release` |
           | LTO | Off (same as yosys official CI) |
-          | `YOSYS_USE_BUNDLED_LIBS` | Off (unused in v0.68) |
+          | `YOSYS_USE_BUNDLED_LIBS` | Off (upstream default) |
           | `BUILD_SHARED_LIBS` | Off (CMake default) |
           | Pyosys | Separate `YOSYS_BUILD_PYTHON_ONLY` build (Python 3.9) |
           | Target CPU | `x86-64-v3` (Haswell 2013+) |
