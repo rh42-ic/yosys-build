@@ -223,16 +223,22 @@ jobs:
           name: yosys-packages
           path: dist
 
-      - name: Prefer stable suite (bullseye) over drifted security suite
+      - name: Drop drifted bullseye-security suite
         run: |
-          # The bullseye-security Packages index lists versions whose pool files
-          # are gone (e.g. ca-certificates 20250419~deb12u1~deb11u1 and
-          # libpython3.9-stdlib 3.9.2-1+deb11u7 -> 404), which breaks any
-          # dependency install touching python3.9/ca-certificates. Prefer
-          # stable-suite versions; security stays usable for anything that is
-          # only available there.
-          printf 'Package: *\nPin: release a=bullseye\nPin-Priority: 1001\n' \
-            > /etc/apt/preferences.d/00-stable-priority
+          # The bullseye-security Packages index (identical md5 on deb.debian.org
+          # and security.debian.org) still lists ca-certificates
+          # 20250419~deb12u1~deb11u1 and libpython3.9-stdlib 3.9.2-1+deb11u7 while
+          # those pool files return 404 on both mirrors, so any install touching
+          # the python3.9/openssl chain fails and retries cannot help. Debian
+          # Release files have no Archive field, so `Pin: release a=bullseye`
+          # cannot select a suite; drop the drifted security suite instead and
+          # resolve the dependency closure from the stable suite.
+          find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -i '/debian-security/d' {} +
+          if grep -Rqs 'debian-security' /etc/apt/sources.list /etc/apt/sources.list.d; then
+            echo '::error::debian-security suite still configured after rewrite' >&2
+            exit 1
+          fi
 
       - name: Install DEB packages (resolves dependencies from repos)
         run: |
