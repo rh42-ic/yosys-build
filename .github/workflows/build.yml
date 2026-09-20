@@ -52,6 +52,13 @@ jobs:
           | `yosys-*.rpm` / `yosys-*.deb` | yosys driver, yosys-abc, techlibs, Tcl integration |
           | `yosys-python-*.rpm` / `python3-yosys-*.deb` | Pyosys Python 3.9 bindings (`import pyosys`), optional |
 
+          > **`yosys-python` / `python3-yosys` are optional subpackages.** They ship the
+          > Python 3.9 bindings (`import pyosys`) and the files pyosys needs at runtime;
+          > the main `yosys` package works without them. The main binary deliberately
+          > does not link `libpython`, so it keeps running on systems without
+          > `libpython3.9` (Debian 10, Ubuntu 20.04). For Python versions other than
+          > 3.9 use the upstream [PyPI wheels](https://pypi.org/project/yosys/).
+
           ## Build Configuration
 
           | Option | Value |
