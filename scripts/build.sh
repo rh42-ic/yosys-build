@@ -1,9 +1,39 @@
 #!/usr/bin/env bash
 # Build yosys from source with static-runtime linkage for portability
 # Target: RHEL 8+ / glibc >= 2.28, x86-64-v3
+#
+# Usage: bash scripts/build.sh [yosys-git-tag]
+#   No argument or "latest": automatically track the newest upstream release.
+#   An explicit tag (e.g. v0.71) pins the version.
+#
+# Python bindings (pyosys) are DISABLED by default (WITH_PYOSYS=0): the module
+# is ABI-locked to the build interpreter (EL8's python39) and has proven
+# incompatible with RHEL 8 stock Python setups. The main binary never links
+# libpython either way. Re-enable the optional yosys-python / python3-yosys
+# subpackages with:  WITH_PYOSYS=1 bash scripts/build.sh <tag>
 set -euo pipefail
 
-TAG="${1:?Usage: $0 <yosys-git-tag>}"
+TAG="${1:-latest}"
+
+# ----- Resolve tag: default is the newest upstream release -----
+if [ "${TAG}" = "latest" ]; then
+	echo "Resolving latest upstream yosys release..."
+	TAG="$(curl -fsSL https://api.github.com/repos/YosysHQ/yosys/releases/latest 2>/dev/null \
+		| sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+		| head -n1 || true)"
+	if [ -z "${TAG}" ]; then
+		# Fallback when the GitHub API is rate-limited: newest v* tag by version
+		# (only v* tags - ancient "yosys-0.x" tags would sort last under sort -V)
+		TAG="$(git ls-remote --tags https://github.com/YosysHQ/yosys.git \
+			| awk '{t=$2; sub(/^refs\/tags\//, "", t); if (t ~ /^v[0-9]/ && t !~ /\^\{\}$/) print t}' \
+			| sort -V | tail -n1 || true)"
+	fi
+	if [ -z "${TAG}" ]; then
+		echo "FAIL: could not resolve the latest yosys release tag" >&2
+		exit 1
+	fi
+	echo "Building upstream release ${TAG}"
+fi
 VERSION="${TAG#v}"
 # Package iteration: bump when repackaging the same upstream version
 ITERATION=1
@@ -20,11 +50,23 @@ SRC_DIR="${SCRIPT_DIR}/../yosys-src"
 # ----- Enable GCC 14 from gcc-toolset-14 -----
 source /opt/rh/gcc-toolset-14/enable
 
-# ----- Clone yosys -----
+# Python bindings switch (see header comment): OFF by default
+WITH_PYOSYS="${WITH_PYOSYS:-0}"
+
+# ----- Clone yosys (re-clone when the cached source is for another tag) -----
+TAG_FILE="${SRC_DIR}/.yosys-build-tag"
+if [ -d "${SRC_DIR}" ]; then
+	CLONED_TAG="$(cat "${TAG_FILE}" 2>/dev/null || true)"
+	if [ "${CLONED_TAG}" != "${TAG}" ]; then
+		echo "yosys-src holds ${CLONED_TAG:-<unknown tag>}; re-cloning for ${TAG}"
+		rm -rf "${SRC_DIR}"
+	fi
+fi
 if [ ! -d "${SRC_DIR}" ]; then
 	git clone --branch "${TAG}" \
 		--depth 1 --recurse-submodules --shallow-submodules \
 		https://github.com/YosysHQ/yosys.git "${SRC_DIR}"
+	echo "${TAG}" >"${TAG_FILE}"
 fi
 
 # ----- Common flags -----
@@ -54,7 +96,8 @@ COMMON_CMAKE_ARGS=(
 # ----- Build 1: main binary, WITHOUT python -----
 # With YOSYS_WITH_PYTHON=ON the yosys driver links libpython directly, which would
 # force a python3.9 runtime dependency on the main package (and break the DEB on
-# Ubuntu 20.04+/Debian 10). Python support ships as a separate subpackage instead.
+# Ubuntu 20.04+/Debian 10). Python support used to ship as a separate subpackage
+# instead - and is now OFF by default entirely (WITH_PYOSYS=0).
 rm -rf "${BUILD_DIR}"
 cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
 	"${COMMON_CMAKE_ARGS[@]}" \
@@ -71,31 +114,39 @@ fi
 # ----- Functional check (same as yosys' official test-compile CI step) -----
 "${BUILD_DIR}/yosys" -p "read_verilog -sv ${SRC_DIR}/tests/simple/always01.v; synth -run coarse;"
 
-# ----- Build 2: pyosys Python module (python-only build, same pattern as upstream wheels) -----
+# ----- Install main package to staging -----
+rm -rf "${STAGING_DIR}"
+DESTDIR="${STAGING_DIR}" cmake --install "${BUILD_DIR}" --strip
+
+# ----- Build 2 (optional, WITH_PYOSYS=1): pyosys Python module -----
+# Python-only build, same pattern as upstream wheels. The module is compiled
+# against python39's ABI (EL8 AppStream) and only works with that interpreter -
+# this is what made it fragile against RHEL 8 stock Python, hence the opt-in.
 # YOSYS_INSTALL_PYTHON_SITEDIR is set to the RHEL-style purelib path
 # (/usr/lib/python3.9/site-packages, where EL8's python39 looks). Debian
 # python3 does NOT search that path (it uses /usr/lib/python3/dist-packages),
 # so the DEB is repacked from a Debian-layout staging below.
-rm -rf "${BUILD_PY_DIR}"
-cmake -B "${BUILD_PY_DIR}" -S "${SRC_DIR}" \
-	"${COMMON_CMAKE_ARGS[@]}" \
-	-DYOSYS_WITH_PYTHON=ON \
-	-DYOSYS_INSTALL_PYTHON=ON \
-	-DYOSYS_INSTALL_DRIVER=OFF \
-	-DYOSYS_INSTALL_LIBRARY=OFF \
-	-DYOSYS_BUILD_PYTHON_ONLY=ON \
-	-DYOSYS_INSTALL_PYTHON_SITEDIR=/usr/lib/python3.9/site-packages
+if [ "${WITH_PYOSYS}" = "1" ]; then
+	rm -rf "${BUILD_PY_DIR}"
+	cmake -B "${BUILD_PY_DIR}" -S "${SRC_DIR}" \
+		"${COMMON_CMAKE_ARGS[@]}" \
+		-DYOSYS_WITH_PYTHON=ON \
+		-DYOSYS_INSTALL_PYTHON=ON \
+		-DYOSYS_INSTALL_DRIVER=OFF \
+		-DYOSYS_INSTALL_LIBRARY=OFF \
+		-DYOSYS_BUILD_PYTHON_ONLY=ON \
+		-DYOSYS_INSTALL_PYTHON_SITEDIR=/usr/lib/python3.9/site-packages
 
-if ! cmake --build "${BUILD_PY_DIR}" -j"$(nproc)" >/tmp/yosys-build-py.log 2>&1; then
-	echo "FAIL: pyosys build failed, last lines of the log:"
-	tail -n 120 /tmp/yosys-build-py.log
-	exit 1
+	if ! cmake --build "${BUILD_PY_DIR}" -j"$(nproc)" >/tmp/yosys-build-py.log 2>&1; then
+		echo "FAIL: pyosys build failed, last lines of the log:"
+		tail -n 120 /tmp/yosys-build-py.log
+		exit 1
+	fi
+
+	# ----- Install pyosys to staging -----
+	rm -rf "${STAGING_PY_DIR}"
+	DESTDIR="${STAGING_PY_DIR}" cmake --install "${BUILD_PY_DIR}" --strip
 fi
-
-# ----- Install to staging -----
-rm -rf "${STAGING_DIR}" "${STAGING_PY_DIR}"
-DESTDIR="${STAGING_DIR}" cmake --install "${BUILD_DIR}" --strip
-DESTDIR="${STAGING_PY_DIR}" cmake --install "${BUILD_PY_DIR}" --strip
 
 # ----- Build RPM / DEB packages -----
 mkdir -p "${DIST_DIR}"
@@ -138,52 +189,54 @@ fpm -s dir -t deb \
 	-p "${DIST_DIR}/yosys-${VERSION}-${ITERATION}_amd64.deb" \
 	-C "${STAGING_DIR}" usr/
 
-# RPM: pyosys Python 3.9 bindings (self-contained: module + abc + techlibs)
-fpm -s dir -t rpm \
-	-n yosys-python \
-	-v "${VERSION}" \
-	--iteration "${ITERATION}" \
-	--architecture x86_64 \
-	--description "Pyosys - Yosys Python 3.9 bindings (import pyosys)" \
-	--url "https://yosyshq.net/yosys/" \
-	--license ISC \
-	--maintainer yosys-build \
-	--rpm-os linux \
-	--no-auto-depends \
-	--depends "glibc >= 2.28" \
-	--depends python39-libs \
-	--depends tcl \
-	--depends zlib \
-	--depends ncurses-libs \
-	-p "${DIST_DIR}/yosys-python-${VERSION}-${ITERATION}.el8.x86_64.rpm" \
-	-C "${STAGING_PY_DIR}" usr/
+if [ "${WITH_PYOSYS}" = "1" ]; then
+	# RPM: pyosys Python 3.9 bindings (self-contained: module + abc + techlibs)
+	fpm -s dir -t rpm \
+		-n yosys-python \
+		-v "${VERSION}" \
+		--iteration "${ITERATION}" \
+		--architecture x86_64 \
+		--description "Pyosys - Yosys Python 3.9 bindings (import pyosys)" \
+		--url "https://yosyshq.net/yosys/" \
+		--license ISC \
+		--maintainer yosys-build \
+		--rpm-os linux \
+		--no-auto-depends \
+		--depends "glibc >= 2.28" \
+		--depends python39-libs \
+		--depends tcl \
+		--depends zlib \
+		--depends ncurses-libs \
+		-p "${DIST_DIR}/yosys-python-${VERSION}-${ITERATION}.el8.x86_64.rpm" \
+		-C "${STAGING_PY_DIR}" usr/
 
-# DEB: python3-yosys (Debian 11 / python3.9). Debian's python3 only searches
-# /usr/lib/python3/dist-packages, not the RHEL-style site-packages path, so
-# repack the module into a Debian-layout staging tree.
-rm -rf "${STAGING_DEB_PY_DIR}"
-mkdir -p "${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages"
-cp -a "${STAGING_PY_DIR}/usr/lib/python3.9/site-packages/pyosys" \
-	"${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages/"
+	# DEB: python3-yosys (Debian 11 / python3.9). Debian's python3 only searches
+	# /usr/lib/python3/dist-packages, not the RHEL-style site-packages path, so
+	# repack the module into a Debian-layout staging tree.
+	rm -rf "${STAGING_DEB_PY_DIR}"
+	mkdir -p "${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages"
+	cp -a "${STAGING_PY_DIR}/usr/lib/python3.9/site-packages/pyosys" \
+		"${STAGING_DEB_PY_DIR}/usr/lib/python3/dist-packages/"
 
-fpm -s dir -t deb \
-	-n python3-yosys \
-	-v "${VERSION}" \
-	--iteration "${ITERATION}" \
-	--architecture amd64 \
-	--description "Pyosys - Yosys Python 3.9 bindings (import pyosys)" \
-	--url "https://yosyshq.net/yosys/" \
-	--license ISC \
-	--maintainer yosys-build \
-	--no-auto-depends \
-	--depends "libc6 (>= 2.28)" \
-	--depends libpython3.9 \
-	--depends tcl8.6 \
-	--depends zlib1g \
-	--depends libncursesw6 \
-	--depends libtinfo6 \
-	-p "${DIST_DIR}/python3-yosys-${VERSION}-${ITERATION}_amd64.deb" \
-	-C "${STAGING_DEB_PY_DIR}" usr/
+	fpm -s dir -t deb \
+		-n python3-yosys \
+		-v "${VERSION}" \
+		--iteration "${ITERATION}" \
+		--architecture amd64 \
+		--description "Pyosys - Yosys Python 3.9 bindings (import pyosys)" \
+		--url "https://yosyshq.net/yosys/" \
+		--license ISC \
+		--maintainer yosys-build \
+		--no-auto-depends \
+		--depends "libc6 (>= 2.28)" \
+		--depends libpython3.9 \
+		--depends tcl8.6 \
+		--depends zlib1g \
+		--depends libncursesw6 \
+		--depends libtinfo6 \
+		-p "${DIST_DIR}/python3-yosys-${VERSION}-${ITERATION}_amd64.deb" \
+		-C "${STAGING_DEB_PY_DIR}" usr/
+fi
 
 # ----- Print summary -----
 echo ""
@@ -197,5 +250,9 @@ echo ""
 echo "Main binary dynamic library dependencies:"
 ldd "${STAGING_DIR}/usr/bin/yosys" 2>/dev/null || true
 echo ""
-echo "pyosys module dynamic library dependencies:"
-ldd "${STAGING_PY_DIR}/usr/lib/python3.9/site-packages/pyosys/libyosys.so" 2>/dev/null || true
+if [ "${WITH_PYOSYS}" = "1" ]; then
+	echo "pyosys module dynamic library dependencies:"
+	ldd "${STAGING_PY_DIR}/usr/lib/python3.9/site-packages/pyosys/libyosys.so" 2>/dev/null || true
+else
+	echo "Python bindings: disabled (WITH_PYOSYS=0)"
+fi

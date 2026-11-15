@@ -2,6 +2,10 @@
 # Install build dependencies on AlmaLinux 8 / RHEL 8 / Rocky Linux 8
 set -euo pipefail
 
+# Python bindings (pyosys) build deps are only installed when explicitly
+# requested: WITH_PYOSYS=1 bash scripts/install-deps.sh
+WITH_PYOSYS="${WITH_PYOSYS:-0}"
+
 # ----- Enable required repos -----
 dnf install -y epel-release dnf-plugins-core
 dnf config-manager --set-enabled powertools
@@ -44,8 +48,12 @@ dnf install -y \
 	rpm-build \
 	dpkg-dev
 
-# ----- Python deps for Pyosys (yosys FindPyosysEnv requires pybind11 + cxxheaderparser on the host interpreter; pyosys/generator.py needs Python >= 3.9) -----
-python3.9 -m pip install --no-cache-dir 'pybind11>=3,<4' 'cxxheaderparser>=1.4'
+# ----- Python deps for Pyosys (only when building the optional python bindings
+# with WITH_PYOSYS=1; the main yosys build only needs a Python >= 3.7
+# interpreter, which python39 above provides - EL8's system python3 is 3.6) -----
+if [ "${WITH_PYOSYS}" = "1" ]; then
+	python3.9 -m pip install --no-cache-dir 'pybind11>=3,<4' 'cxxheaderparser>=1.4'
+fi
 
 # ----- Install CMake from official binary (repo CMake 3.20 is too old) -----
 CMAKE_VERSION=3.31.6
@@ -156,6 +164,8 @@ cmake --version | head -1
 bison --version | head -1
 flex --version | head -1
 python3.9 --version
-python3.9 -m pybind11 --version
+if [ "${WITH_PYOSYS}" = "1" ]; then
+	python3.9 -m pybind11 --version
+fi
 echo "readline: $(PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --modversion readline) (static)"
 echo "libffi: $(PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --modversion libffi) (static)"

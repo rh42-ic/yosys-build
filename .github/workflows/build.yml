@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Yosys git tag to build (e.g. v0.69)"
+        description: "Yosys git tag to build (e.g. v0.71)"
         required: true
         type: string
 
@@ -50,14 +50,12 @@ jobs:
           | Package | Contents |
           |---------|----------|
           | `yosys-*.rpm` / `yosys-*.deb` | yosys driver, yosys-abc, techlibs, Tcl integration |
-          | `yosys-python-*.rpm` / `python3-yosys-*.deb` | Pyosys Python 3.9 bindings (`import pyosys`), optional |
 
-          > **`yosys-python` / `python3-yosys` are optional subpackages.** They ship the
-          > Python 3.9 bindings (`import pyosys`) and the files pyosys needs at runtime;
-          > the main `yosys` package works without them. The main binary deliberately
-          > does not link `libpython`, so it keeps running on systems without
-          > `libpython3.9` (Debian 10, Ubuntu 20.04). For Python versions other than
-          > 3.9 use the upstream [PyPI wheels](https://pypi.org/project/yosys/).
+          > **Python bindings (Pyosys) are disabled in this build.** The module is
+          > ABI-locked to the build interpreter (EL8's python39) and has proven
+          > incompatible with RHEL 8 stock Python setups, so it is no longer built
+          > by default (`WITH_PYOSYS=0`). The main binary does not link `libpython`.
+          > For Python bindings use the upstream [PyPI wheels](https://pypi.org/project/yosys/).
 
           ## Build Configuration
 
@@ -69,7 +67,7 @@ jobs:
           | LTO | Off (same as yosys official CI) |
           | `YOSYS_USE_BUNDLED_LIBS` | Off (upstream default) |
           | `BUILD_SHARED_LIBS` | Off (CMake default) |
-          | Pyosys | Separate `YOSYS_BUILD_PYTHON_ONLY` build (Python 3.9) |
+          | Pyosys | Disabled (`WITH_PYOSYS=0`; RHEL 8 stock Python incompatibility) |
           | Target CPU | `x86-64-v3` (Haswell 2013+) |
           | Float flags | `-fno-math-errno -fno-trapping-math` |
           | C/C++ runtime | Static (`-static-libgcc -static-libstdc++`) |
@@ -91,12 +89,6 @@ jobs:
           | Tcl | `tcl` | `tcl8.6` |
           | zlib | `zlib` | `zlib1g` |
           | ncurses (termcap) | `ncurses-libs` | `libncursesw6`, `libtinfo6` |
-
-          Python subpackage additionally requires:
-
-          | Library | RPM | DEB |
-          |---------|-----|-----|
-          | Python 3.9 | `python39-libs` | `libpython3.9` |
 
           Statically linked (no runtime dependency): readline 8.2, libffi 3.4.8,
           libstdc++/libgcc, ABC, fmt, json11, fst, bigint, slang…
@@ -186,7 +178,7 @@ jobs:
 
       - name: Check glibc ceiling (must be <= 2.28)
         run: |
-          for bin in /usr/bin/yosys /usr/bin/yosys-abc /usr/lib/python3.9/site-packages/pyosys/libyosys.so; do
+          for bin in /usr/bin/yosys /usr/bin/yosys-abc; do
             [ -e "$bin" ] || { echo "FAIL: missing $bin"; exit 1; }
             max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
             echo "$bin -> max symbol $max"
@@ -269,16 +261,6 @@ jobs:
           EOF
           yosys -V
           yosys -q -p 'read_verilog -sv /tmp/top.sv; synth -top top; stat'
-
-      - name: Smoke test pyosys
-        run: |
-          apt-get install -y python3
-          python3 -c "
-          from pyosys import libyosys as ys
-          d = ys.Design()
-          ys.run_pass('help', d)
-          print('pyosys OK:', ys.__file__)
-          "
 
   build-win:
     name: Build Windows package (${{ github.ref_name }})
